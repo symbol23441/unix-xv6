@@ -121,6 +121,9 @@ panic(char *s)
   printf("panic: ");
   printf(s);
   printf("\n");
+
+  backtrace() //崩溃返回地址回溯。
+   
   panicked = 1; // freeze uart output from other CPUs
   for(;;)
     ;
@@ -131,4 +134,14 @@ printfinit(void)
 {
   initlock(&pr.lock, "pr");
   pr.locking = 1;
+}
+
+void backtrace(){
+  uint64 fp = r_fp();
+  printf("backtrace:\n");
+  while(PGROUNDDOWN(fp) != PGROUNDUP(fp)){
+    uint64 ra = *(uint64*)(fp - 8); // return address
+    printf("%p\n",ra);
+    fp = *(uint64*)(fp - 16);       //前一个函数的fp
+  }
 }
