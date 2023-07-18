@@ -77,8 +77,22 @@ usertrap(void)
     exit(-1);
 
   // give up the CPU if this is a timer interrupt.
-  if(which_dev == 2)
+  if(which_dev == 2){
+    if(p->alarm_interval != 0 && --p->alarm_ticks<=0 && p->alarm_goingoff == 0){
+      // alarm_interval != 0 开启闹钟
+      // --p->alarm_ticks<=0 闹钟时间到
+      // p->alarm_goingoff == 0 当前未在执行闹钟回调
+      p->alarm_ticks = p->alarm_interval;   // 重置闹钟
+      *p->alarm_trapframe = *p->trapframe;  // 暂存 原进程运行状态trapframe
+      p->trapframe->epc = (uint64)p->alarm_handler; // 切换到闹钟回调地址，执行回调函数
+      p->alarm_goingoff = 1;                // 标记当前有闹钟回调执行
+    }
+
+
+
     yield();
+  }
+    
 
   usertrapret();
 }
@@ -218,3 +232,21 @@ devintr()
   }
 }
 
+// 设置闹钟的相关属性
+int
+sigalarm(int ticks,void(* handler)()){
+  struct proc* p = myproc();
+  p->alarm_interval = ticks;
+  p->alarm_handler = handler;
+  p->alarm_ticks = p->alarm_interval;
+  return 0;  
+}
+
+// 将进程恢复到alarm中断前的状态
+int
+sigreturn(){
+  struct proc* p = myproc();
+  *p->trapframe = *p->alarm_trapframe;
+  p->alarm_goingoff = 0;
+  return 0;
+}

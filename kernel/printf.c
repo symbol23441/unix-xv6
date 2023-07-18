@@ -122,7 +122,7 @@ panic(char *s)
   printf(s);
   printf("\n");
 
-  backtrace() //崩溃返回地址回溯。
+  backtrace(); //崩溃返回地址回溯。
    
   panicked = 1; // freeze uart output from other CPUs
   for(;;)

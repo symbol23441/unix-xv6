@@ -97,3 +97,21 @@ sys_uptime(void)
   release(&tickslock);
   return xticks;
 }
+
+// 设置闹钟,注册回调
+uint64
+sys_sigalarm(void){
+  int n;      // n个ticks
+  uint64 fn;  // 时钟回调函数
+  if (argint(0,&n)<0)
+    return -1;
+  if(argaddr(1,&fn)<0)
+    return -1;
+  return sigalarm(n,(void(*)())(fn)); //调用sigalarm进行信号量注册
+}
+
+// 闹钟信号回调执行完，恢复原进程状态
+uint64
+sys_sigreturn(void){
+  return sigreturn();
+}

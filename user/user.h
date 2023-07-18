@@ -23,6 +23,8 @@ int getpid(void);
 char* sbrk(int);
 int sleep(int);
 int uptime(void);
+int sigalarm(int ticks,void(* handler)());    // 定时闹钟信号，注册回调函数
+int sigreturn(void);                            // 执行完闹钟回调函数后，返回原来进程位置
 
 // ulib.c
 int stat(const char*, struct stat*);

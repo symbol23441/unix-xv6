@@ -146,6 +146,8 @@ void            trapinit(void);
 void            trapinithart(void);
 extern struct spinlock tickslock;
 void            usertrapret(void);
+int             sigalarm(int ticks,void(* handler)());    // 设置闹钟,注册回调
+int             sigreturn();                                // 闹钟信号回调执行完，恢复原进程状态
 
 // uart.c
 void            uartinit(void);
