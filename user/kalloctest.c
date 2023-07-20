@@ -43,6 +43,7 @@ void test1(void)
   int n, m;
   printf("start test1\n");  
   m = ntas(0);
+  // 创建NCHILD个子进程,竞争锁
   for(int i = 0; i < NCHILD; i++){
     int pid = fork();
     if(pid < 0){
@@ -72,6 +73,7 @@ void test1(void)
     printf("test1 OK\n");
   else
     printf("test1 FAIL\n");
+  printf("%d\n",n-m);
 }
 
 //
