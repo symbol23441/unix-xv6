@@ -13,6 +13,20 @@
 // * Only one process at a time can use a buffer,
 //     so do not keep them longer than necessary.
 
+// 缓冲区缓存。
+
+// 缓冲区缓存是一个由 buf 结构组成的链表，保存了磁盘块内容的缓存副本。
+// 将磁盘块缓存在内存中可以减少磁盘读取次数，同时也为多个进程使用同一磁盘块提供了同步点。
+
+// 接口说明：
+
+// * 要获取某个磁盘块的缓冲区，调用 bread。
+// * 修改缓冲区数据后，调用 bwrite 将其写入磁盘。
+// * 使用完缓冲区后，调用 brelse。
+// * 调用 brelse 后不要再使用该缓冲区。
+// * 同一时间只能有一个进程使用一个缓冲区，
+//     所以不要比必要时间用得更久。
+
 
 #include "types.h"
 #include "param.h"

@@ -43,7 +43,7 @@ filealloc(void)
   return 0;
 }
 
-// Increment ref count for file f.
+// 增加文件f的引用计数
 struct file*
 filedup(struct file *f)
 {
@@ -129,8 +129,9 @@ fileread(struct file *f, uint64 addr, int n)
   return r;
 }
 
-// Write to file f.
-// addr is a user virtual address.
+
+// 写文件f
+// addr 是用户的虚拟地址
 int
 filewrite(struct file *f, uint64 addr, int n)
 {
@@ -146,13 +147,11 @@ filewrite(struct file *f, uint64 addr, int n)
       return -1;
     ret = devsw[f->major].write(1, addr, n);
   } else if(f->type == FD_INODE){
-    // write a few blocks at a time to avoid exceeding
-    // the maximum log transaction size, including
-    // i-node, indirect block, allocation blocks,
-    // and 2 blocks of slop for non-aligned writes.
-    // this really belongs lower down, since writei()
-    // might be writing a device like the console.
-    int max = ((MAXOPBLOCKS-1-1-2) / 2) * BSIZE;
+    // 每次只写入几个块，以避免超过最大日志事务（log transaction）大小的限制，
+    // 这个限制包括：i-node、间接块、分配块，
+    // 以及为了处理非对齐写入而预留的两个额外块。
+    // 其实这段逻辑更应该放在更底层，因为 writei() 可能会写入的是像控制台这样的设备
+    int max = ((MAXOPBLOCKS-1-1-2) / 2) * BSIZE;    // -1 日志头预留、 -1 日志提交块、 -2 非对齐slop块 、  /2  （inode + 数据块）
     int i = 0;
     while(i < n){
       int n1 = n - i;
@@ -167,7 +166,7 @@ filewrite(struct file *f, uint64 addr, int n)
       end_op();
 
       if(r != n1){
-        // error from writei
+        // writei 发生错误
         break;
       }
       i += r;

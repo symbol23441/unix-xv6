@@ -52,29 +52,34 @@ void uartstart();
 void
 uartinit(void)
 {
-  // disable interrupts.
+  // disable interrupts. 关闭UART设备的中断
   WriteReg(IER, 0x00);
 
   // special mode to set baud rate.
+  // LCR（Line Control Register）,UART控制寄存器。开始设置波特率模式
   WriteReg(LCR, LCR_BAUD_LATCH);
 
-  // LSB for baud rate of 38.4K.
+  // 波特率分频器通常占16位，LSB、MSB分别为低八位和高八位。 
+  // LSB for baud rate of 38.4K. 
+  // UART波特率 =  输入时钟 / (16 × divisor) ||| 输入时钟 是 UART 的时钟源,divisor 是 UART 控制器中一个可编程的分频值, 16是固定的，表示：UART 硬件内部每发送 1 bit，会进行 16 次采样来保证精度
+  // 例如:输入时钟是 1.8432 MHz（标准值），要配置 38400 波特率.divisor = = 1,843,200 / (16 * 38400) = 3
   WriteReg(0, 0x03);
-
   // MSB for baud rate of 38.4K.
   WriteReg(1, 0x00);
 
-  // leave set-baud mode,
+  // leave set-baud mode,结束设置波特率模式
   // and set word length to 8 bits, no parity.
   WriteReg(LCR, LCR_EIGHT_BITS);
 
-  // reset and enable FIFOs.
+  // reset and enable FIFOs. 重置并启动FIFO缓存，UART的硬件缓存
   WriteReg(FCR, FCR_FIFO_ENABLE | FCR_FIFO_CLEAR);
 
   // enable transmit and receive interrupts.
   WriteReg(IER, IER_TX_ENABLE | IER_RX_ENABLE);
 
+  // 初始化发送锁，（TX） → 向串口写入数据
   initlock(&uart_tx_lock, "uart");
+  // 读入有OS统一进行，中断读取。封装后再给用户进程。因此不必加锁，也可有cons.lock
 }
 
 // add a character to the output buffer and tell the

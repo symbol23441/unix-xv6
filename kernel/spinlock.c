@@ -81,10 +81,11 @@ holding(struct spinlock *lk)
   return r;
 }
 
-// push_off/pop_off are like intr_off()/intr_on() except that they are matched:
-// it takes two pop_off()s to undo two push_off()s.  Also, if interrupts
-// are initially off, then push_off, pop_off leaves them off.
+// push_off/pop_off 类似于 intr_off()/intr_on()，但它们是成对使用的：
+// 两次 push_off() 需要用两次 pop_off() 来对应恢复。
+// 此外，如果最初中断是关闭的，那么 push_off 和 pop_off 执行后仍会保持中断关闭。
 
+// 嵌套关中断
 void
 push_off(void)
 {
@@ -96,6 +97,8 @@ push_off(void)
   mycpu()->noff += 1;
 }
 
+
+// 嵌套开中断
 void
 pop_off(void)
 {
