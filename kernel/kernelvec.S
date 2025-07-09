@@ -1,17 +1,16 @@
 	#
-        # interrupts and exceptions while in supervisor
-        # mode come here.
+        # 当处于管理模式（Supervisor mode）时发生中断或异常，会跳转到这里。
         #
-        # push all registers, call kerneltrap(), restore, return.
+        # 这里会保存所有寄存器，调用 kerneltrap() 处理，再恢复寄存器，最后返回。
         #
 .globl kerneltrap
 .globl kernelvec
 .align 4
 kernelvec:
-        // make room to save registers.
+        # 为保存寄存器开辟栈空间
         addi sp, sp, -256
 
-        // save the registers.
+        # 寄存器值压栈
         sd ra, 0(sp)
         sd sp, 8(sp)
         sd gp, 16(sp)
@@ -44,14 +43,14 @@ kernelvec:
         sd t5, 232(sp)
         sd t6, 240(sp)
 
-	// call the C trap handler in trap.c
+	# 调用trap.c的C trap() 
         call kerneltrap
 
-        // restore registers.
+        # 恢复寄存器
         ld ra, 0(sp)
         ld sp, 8(sp)
         ld gp, 16(sp)
-        // not this, in case we moved CPUs: ld tp, 24(sp)
+        # not this, in case we moved CPUs: ld tp, 24(sp)
         ld t0, 32(sp)
         ld t1, 40(sp)
         ld t2, 48(sp)
@@ -82,34 +81,35 @@ kernelvec:
 
         addi sp, sp, 256
 
-        // return to whatever we were doing in the kernel.
+        # 返回到上一次内核的被中断的位置
         sret
 
+
         #
-        # machine-mode timer interrupt.
+        # M-Mode下的 定时器中断。
+        # 因为定时器中断在M-Mode下的权限 CLINT（Core Local Interruptor）中，因此在这里通过软件中断，再次转发非S-Mode
         #
 .globl timervec
 .align 4
 timervec:
-        # start.c has set up the memory that mscratch points to:
-        # scratch[0,8,16] : register save area.
-        # scratch[24] : address of CLINT's MTIMECMP register.
-        # scratch[32] : desired interval between interrupts.
+        # start.c 已经设置好了 mscratch 寄存器指向的内存区域：
+        # scratch[0,8,16]：用于保存寄存器的区域；
+        # scratch[24]：存放 CLINT 的 mtimecmp 寄存器的地址；
+        # scratch[32]：存放希望两次中断之间的时间间隔。
         
         csrrw a0, mscratch, a0
         sd a1, 0(a0)
         sd a2, 8(a0)
         sd a3, 16(a0)
 
-        # schedule the next timer interrupt
-        # by adding interval to mtimecmp.
+        # 通过将间隔值加到 mtimecmp，来安排下一次定时器中断。
         ld a1, 24(a0) # CLINT_MTIMECMP(hart)
         ld a2, 32(a0) # interval
         ld a3, 0(a1)
         add a3, a3, a2
         sd a3, 0(a1)
 
-        # raise a supervisor software interrupt.
+        # 触发一次管理模式的软件中断。
 	li a1, 2
         csrw sip, a1
 

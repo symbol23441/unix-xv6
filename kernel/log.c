@@ -122,18 +122,21 @@ recover_from_log(void)
   write_head(); // clear the log
 }
 
-// called at the start of each FS system call.
+// 在每个文件系统系统调用开始时调用，
+// 确保日志空间足够，并控制并发提交。
 void
 begin_op(void)
 {
   acquire(&log.lock);
   while(1){
+    // 如果当前有事务正在提交，睡眠等待提交完成
     if(log.committing){
       sleep(&log, &log.lock);
     } else if(log.lh.n + (log.outstanding+1)*MAXOPBLOCKS > LOGSIZE){
-      // this op might exhaust log space; wait for commit.
+      // 若本次操作可能导致日志空间不足，睡眠等待提交腾出空间
       sleep(&log, &log.lock);
     } else {
+      // 可以安全地执行本次操作，占用一个事务引用
       log.outstanding += 1;
       release(&log.lock);
       break;

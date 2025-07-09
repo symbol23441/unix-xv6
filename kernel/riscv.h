@@ -1,4 +1,4 @@
-// which hart (core) is this?
+// 查询当前CPU的核心ID
 static inline uint64
 r_mhartid()
 {
@@ -6,6 +6,7 @@ r_mhartid()
   asm volatile("csrr %0, mhartid" : "=r" (x) );
   return x;
 }
+// GCC内联汇编格式  asm volatile("汇编指令" : 输出操作数 : 输入操作数 : 被破坏的寄存器);
 
 // Machine Status Register, mstatus
 
@@ -43,7 +44,7 @@ w_mepc(uint64 x)
 #define SSTATUS_SPP (1L << 8)  // Previous mode, 1=Supervisor, 0=User
 #define SSTATUS_SPIE (1L << 5) // Supervisor Previous Interrupt Enable
 #define SSTATUS_UPIE (1L << 4) // User Previous Interrupt Enable
-#define SSTATUS_SIE (1L << 1)  // Supervisor Interrupt Enable
+#define SSTATUS_SIE (1L << 1)  // Supervisor Interrupt Enable             监督级别下中断使能
 #define SSTATUS_UIE (1L << 0)  // User Interrupt Enable
 
 static inline uint64
@@ -93,15 +94,15 @@ w_sie(uint64 x)
   asm volatile("csrw sie, %0" : : "r" (x));
 }
 
-// Machine-mode Interrupt Enable
-#define MIE_MEIE (1L << 11) // external
-#define MIE_MTIE (1L << 7)  // timer
-#define MIE_MSIE (1L << 3)  // software
+// M-Mode 中断使能状态定义
+#define MIE_MEIE (1L << 11) // 外部中断使能
+#define MIE_MTIE (1L << 7)  // 定时器中断使能
+#define MIE_MSIE (1L << 3)  // 软件中断使能
 static inline uint64
 r_mie()
 {
   uint64 x;
-  asm volatile("csrr %0, mie" : "=r" (x) );
+  asm volatile("csrr %0, mie" : "=r" (x) );  // 控制状态寄存器读到x
   return x;
 }
 
@@ -196,10 +197,10 @@ w_pmpaddr0(uint64 x)
 // use riscv's sv39 page table scheme.
 #define SATP_SV39 (8L << 60)
 
-#define MAKE_SATP(pagetable) (SATP_SV39 | (((uint64)pagetable) >> 12))
+#define MAKE_SATP(pagetable) (SATP_SV39 | (((uint64)pagetable) >> 12))   // sv39模式+物理页号  作为寄存器的值
 
-// supervisor address translation and protection;
-// holds the address of the page table.
+// supervisor address translation and protection;  监管级地址转换与保护 寄存器设置
+// holds the address of the page table. 持有当前进程页表的根地址
 static inline void 
 w_satp(uint64 x)
 {
@@ -283,7 +284,7 @@ intr_off()
   w_sstatus(r_sstatus() & ~SSTATUS_SIE);
 }
 
-// are device interrupts enabled?
+// 检查是否启用了设备中断（SIE 位）
 static inline int
 intr_get()
 {
@@ -299,8 +300,7 @@ r_sp()
   return x;
 }
 
-// read and write tp, the thread pointer, which holds
-// this core's hartid (core number), the index into cpus[].
+// 读取和写入线程指针（tp），它保存了当前核心的 hartid（核心编号），即 cpus[] 数组中的索引。
 static inline uint64
 r_tp()
 {
@@ -323,7 +323,7 @@ r_ra()
   return x;
 }
 
-// flush the TLB.
+// flush the TLB. 刷新快表（地址转换旁路缓存）
 static inline void
 sfence_vma()
 {
@@ -335,26 +335,27 @@ sfence_vma()
 #define PGSIZE 4096 // bytes per page
 #define PGSHIFT 12  // bits of offset within a page
 
-#define PGROUNDUP(sz)  (((sz)+PGSIZE-1) & ~(PGSIZE-1))
-#define PGROUNDDOWN(a) (((a)) & ~(PGSIZE-1))
+#define PGROUNDUP(sz)  (((sz)+PGSIZE-1) & ~(PGSIZE-1))      // 按页大小（PGSIZE）向上对齐
+#define PGROUNDDOWN(a) (((a)) & ~(PGSIZE-1))                // 按页大小（PGSIZE）向下对齐
 
-#define PTE_V (1L << 0) // valid
+// 页表物理分配后初始为0，因此初始标志状态均为0
+#define PTE_V (1L << 0) // valid  页表项有效，物理页已经存在于内存中。
 #define PTE_R (1L << 1)
 #define PTE_W (1L << 2)
 #define PTE_X (1L << 3)
 #define PTE_U (1L << 4) // 1 -> user can access
 
 // shift a physical address to the right place for a PTE.
-#define PA2PTE(pa) ((((uint64)pa) >> 12) << 10)
+#define PA2PTE(pa) ((((uint64)pa) >> 12) << 10)             // 物理地址转页表项。清除12为偏移地址，腾出低10为标志位。
 
-#define PTE2PA(pte) (((pte) >> 10) << 12)
+#define PTE2PA(pte) (((pte) >> 10) << 12)                   // 页表项映射到物理地址。右移10位状态标志位，左移12偏移地址0，转化为物理地址。即物理地址有效位数是56位。
 
 #define PTE_FLAGS(pte) ((pte) & 0x3FF)
 
-// extract the three 9-bit page table indices from a virtual address.
+// 从虚拟地址va中提取，当前级level别页表的页表索引[0~511]
 #define PXMASK          0x1FF // 9 bits
-#define PXSHIFT(level)  (PGSHIFT+(9*(level)))
-#define PX(level, va) ((((uint64) (va)) >> PXSHIFT(level)) & PXMASK)
+#define PXSHIFT(level)  (PGSHIFT+(9*(level)))                           // 提取第 level 级页表索引时，虚拟地址需要右移的位数
+#define PX(level, va) ((((uint64) (va)) >> PXSHIFT(level)) & PXMASK)    // 虚拟地址转页表项数组索引(PET index)
 
 // one beyond the highest possible virtual address.
 // MAXVA is actually one bit less than the max allowed by
@@ -362,5 +363,18 @@ sfence_vma()
 // that have the high bit set.
 #define MAXVA (1L << (9 + 9 + 9 + 12 - 1))
 
-typedef uint64 pte_t;
-typedef uint64 *pagetable_t; // 512 PTEs
+
+// RISC-V Sv39 的 64 位页表项 PTE（从高位到低位）结构如下：
+//   位 63..54 —— 保留（未使用）
+//   位 53..10 —— PPN（Physical Page Number，物理页号）
+//   位 9..8   —— RSW（Reserved for Software，软件保留位）
+//   位 7      —— D（Dirty）标志，是否被写入过
+//   位 6      —— A（Accessed）标志，是否被访问过
+//   位 5      —— G（Global），是否为全局映射
+//   位 4      —— U（User），用户态是否可访问
+//   位 3      —— X（Executable），是否可执行
+//   位 2      —— W（Writable），是否可写
+//   位 1      —— R（Readable），是否可读
+//   位 0      —— V（Valid），是否有效
+typedef uint64 pte_t;        // 页表项类型，64位。
+typedef uint64 *pagetable_t; // 页表结构定义。数组长度，512长度（4KB/64bit）。

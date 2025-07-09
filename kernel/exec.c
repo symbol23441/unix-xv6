@@ -29,7 +29,7 @@ exec(char *path, char **argv)
   }
   ilock(ip);
 
-  // Check ELF header
+  // 检查ELF头部
   if(readi(ip, 0, (uint64)&elf, 0, sizeof(elf)) != sizeof(elf))
     goto bad;
   if(elf.magic != ELF_MAGIC)
@@ -38,7 +38,7 @@ exec(char *path, char **argv)
   if((pagetable = proc_pagetable(p)) == 0)
     goto bad;
 
-  // Load program into memory.
+  // 将程序加载进内存
   for(i=0, off=elf.phoff; i<elf.phnum; i++, off+=sizeof(ph)){
     if(readi(ip, 0, (uint64)&ph, off, sizeof(ph)) != sizeof(ph))
       goto bad;
@@ -64,8 +64,8 @@ exec(char *path, char **argv)
   p = myproc();
   uint64 oldsz = p->sz;
 
-  // Allocate two pages at the next page boundary.
-  // Use the second as the user stack.
+  // 在下一个页边界处分配两页内存。
+  // 使用第二页作为用户栈。
   sz = PGROUNDUP(sz);
   uint64 sz1;
   if((sz1 = uvmalloc(pagetable, sz, sz + 2*PGSIZE)) == 0)
@@ -73,13 +73,13 @@ exec(char *path, char **argv)
   sz = sz1;
   uvmclear(pagetable, sz-2*PGSIZE);
   sp = sz;
-  stackbase = sp - PGSIZE;
+  stackbase = sp - PGSIZE;     // stackbase为栈基地址，栈页开始的虚拟地址低地址。sp为栈顶，从栈页高地址向下生长。另外bp会记录当前函数的基地址。函数调用会将
 
-  // Push argument strings, prepare rest of stack in ustack.
+  // 将参数字符串压入栈中，并在 ustack 中准备其余的栈结构。
   for(argc = 0; argv[argc]; argc++) {
     if(argc >= MAXARG)
       goto bad;
-    sp -= strlen(argv[argc]) + 1;
+    sp -= strlen(argv[argc]) + 1; // 为当前参数字符串在栈上分配空间（包括结尾的 \0 字节），并更新栈指针 sp。
     sp -= sp % 16; // riscv sp must be 16-byte aligned
     if(sp < stackbase)
       goto bad;
@@ -87,9 +87,9 @@ exec(char *path, char **argv)
       goto bad;
     ustack[argc] = sp;
   }
-  ustack[argc] = 0;
+  ustack[argc] = 0;     // 按参数规定，构造最后一个参数为NULL ， 如 char *argv[] = { "arg0", "arg1", ..., NULL };
 
-  // push the array of argv[] pointers.
+  // 将 argv[] 指针数组压入栈中。
   sp -= (argc+1) * sizeof(uint64);
   sp -= sp % 16;
   if(sp < stackbase)
@@ -97,26 +97,26 @@ exec(char *path, char **argv)
   if(copyout(pagetable, sp, (char *)ustack, (argc+1)*sizeof(uint64)) < 0)
     goto bad;
 
-  // arguments to user main(argc, argv)
-  // argc is returned via the system call return
-  // value, which goes in a0.
+  // 传递给用户态 main(argc, argv) 的参数
+  // argc 通过系统调用的返回值传递，存放在 a0 寄存器中。
   p->trapframe->a1 = sp;
 
-  // Save program name for debugging.
+  // 提取程序路径中的最后一段（文件名），保存到进程的 p->name 字段中
   for(last=s=path; *s; s++)
     if(*s == '/')
       last = s+1;
   safestrcpy(p->name, last, sizeof(p->name));
     
-  // Commit to the user image.
+  // 切换进程到新的程序
   oldpagetable = p->pagetable;
   p->pagetable = pagetable;
-  p->sz = sz;
-  p->trapframe->epc = elf.entry;  // initial program counter = main
-  p->trapframe->sp = sp; // initial stack pointer
-  proc_freepagetable(oldpagetable, oldsz);
+  p->sz = sz;                     // 进程的虚拟空间大小
+  p->trapframe->epc = elf.entry;  // 初始化程序计数器到 main()
+  p->trapframe->sp = sp;          // 初始化用户栈指针
 
-  return argc; // this ends up in a0, the first argument to main(argc, argv)
+  proc_freepagetable(oldpagetable, oldsz);    // 释放上一个旧程序的页表
+
+  return argc; // 放入a0,作为程序的第一个参数 main(argc, argv)
 
  bad:
   if(pagetable)
@@ -128,10 +128,10 @@ exec(char *path, char **argv)
   return -1;
 }
 
-// Load a program segment into pagetable at virtual address va.
-// va must be page-aligned
-// and the pages from va to va+sz must already be mapped.
-// Returns 0 on success, -1 on failure.
+// 将一个程序段加载到页表 pagetable 中的虚拟地址 va 上。
+// va 必须是页对齐的，
+// 且从 va 到 va+sz 范围内的所有页必须已经映射好。
+// 成功返回 0，失败返回 -1。
 static int
 loadseg(pagetable_t pagetable, uint64 va, struct inode *ip, uint offset, uint sz)
 {

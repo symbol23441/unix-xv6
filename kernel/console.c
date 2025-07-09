@@ -23,18 +23,19 @@
 #include "proc.h"
 
 #define BACKSPACE 0x100
-#define C(x)  ((x)-'@')  // Control-x
+#define C(x)  ((x)-'@')  // 意为：control键+ X字符 。例，Ctrl+A ascii码为1, '@' 为64，‘A’为65。
 
 //
-// send one character to the uart.
-// called by printf, and to echo input characters,
-// but not from write().
+// 发送一个字符到 UART（串口）。
+// 会被 printf 调用，也会用于回显用户输入的字符，
+// 但不会被 write() 系统调用使用。
 //
 void
 consputc(int c)
 {
   if(c == BACKSPACE){
-    // if the user typed backspace, overwrite with a space.
+    // 如果用户按的是退格键（BACKSPACE），不能直接删除字符，因为串口是“只能往前发”的。
+    // 因此，先光标左移一格，在覆盖，再光标左移。 其中，\b 光标左移。 
     uartputc_sync('\b'); uartputc_sync(' '); uartputc_sync('\b');
   } else {
     uartputc_sync(c);
@@ -44,7 +45,7 @@ consputc(int c)
 struct {
   struct spinlock lock;
   
-  // input
+// input
 #define INPUT_BUF 128
   char buf[INPUT_BUF];
   uint r;  // Read index
@@ -54,6 +55,7 @@ struct {
 
 //
 // user write()s to the console go here.
+// 用户程序输出到控制台的信息处理
 //
 int
 consolewrite(int user_src, uint64 src, int n)
@@ -75,7 +77,10 @@ consolewrite(int user_src, uint64 src, int n)
 // copy (up to) a whole input line to dst.
 // user_dist indicates whether dst is a user
 // or kernel address.
-//
+// 用户对控制台执行 read() 调用时，会进入这里。
+// 将（一整行以内的）输入内容复制到 dst 中。
+// user_dst 表示 dst 是用户空间地址还是内核地址。
+// 
 int
 consoleread(int user_dst, uint64 dst, int n)
 {
@@ -100,8 +105,9 @@ consoleread(int user_dst, uint64 dst, int n)
 
     if(c == C('D')){  // end-of-file
       if(n < target){
-        // Save ^D for next time, to make sure
-        // caller gets a 0-byte result.
+        // 保留 ^D  到下次处理，确保read()返回0表示EOF
+        // 根本原因是--UNIX 设计约定：只有当 read() 返回 0 字节时，才表示 EOF。
+        // 若不保留到下次，用户不认为EOF继续读，则会陷入上一个循环死等。
         cons.r--;
       }
       break;
@@ -116,8 +122,8 @@ consoleread(int user_dst, uint64 dst, int n)
     --n;
 
     if(c == '\n'){
-      // a whole line has arrived, return to
-      // the user-level read().
+      // 整行读入已经完成，返回到用户级别去处理
+      // 根本原因是UNIX中，终端默认是“规范模式”（canonical mode），输入是以行为单位处理的。
       break;
     }
   }
@@ -127,10 +133,11 @@ consoleread(int user_dst, uint64 dst, int n)
 }
 
 //
-// the console input interrupt handler.
-// uartintr() calls this for input character.
-// do erase/kill processing, append to cons.buf,
-// wake up consoleread() if a whole line has arrived.
+// 中断触发
+// uartintr() 在接收到输入字符时调用它。
+// 执行擦除（backspace）/ 清除整行（kill line）等处理，
+// 将字符追加到 cons.buf 缓冲区，
+// 如果一整行输入完成，则唤醒 consoleread()。
 //
 void
 consoleintr(int c)
@@ -138,10 +145,10 @@ consoleintr(int c)
   acquire(&cons.lock);
 
   switch(c){
-  case C('P'):  // Print process list.
+  case C('P'):  // Print process list. （control + P）
     procdump();
     break;
-  case C('U'):  // Kill line.
+  case C('U'):  // 清空当前行 （control + U） 
     while(cons.e != cons.w &&
           cons.buf[(cons.e-1) % INPUT_BUF] != '\n'){
       cons.e--;
@@ -159,15 +166,14 @@ consoleintr(int c)
     if(c != 0 && cons.e-cons.r < INPUT_BUF){
       c = (c == '\r') ? '\n' : c;
 
-      // echo back to the user.
+      // echo back to the user. 回显。
       consputc(c);
 
-      // store for consumption by consoleread().
+      // store for consumption by consoleread(). 缓存给控制台读取
       cons.buf[cons.e++ % INPUT_BUF] = c;
 
       if(c == '\n' || c == C('D') || cons.e == cons.r+INPUT_BUF){
-        // wake up consoleread() if a whole line (or end-of-file)
-        // has arrived.
+        // 如果一整行（或文件结束）已到达、结束标识符、缓存上限，唤醒 consoleread()
         cons.w = cons.e;
         wakeup(&cons.r);
       }
@@ -183,10 +189,11 @@ consoleinit(void)
 {
   initlock(&cons.lock, "cons");
 
+  // 初始化UART---(通用异步收发器)硬件设备,最常见的串口设备,能收发字符
   uartinit();
+  
 
-  // connect read and write system calls
-  // to consoleread and consolewrite.
-  devsw[CONSOLE].read = consoleread;
-  devsw[CONSOLE].write = consolewrite;
+  // 将 read 和 write 系统调用连接到 consoleread 和 consolewrite。
+  devsw[CONSOLE].read = consoleread;          // 用于设备读，进程读取控制台的系统调用
+  devsw[CONSOLE].write = consolewrite;        // 用于设备写，进程输出到控制台
 }

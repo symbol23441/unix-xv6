@@ -47,21 +47,20 @@
 #define KERNBASE 0x80000000L
 #define PHYSTOP (KERNBASE + 128*1024*1024)
 
-// map the trampoline page to the highest address,
-// in both user and kernel space.
+// 将trampoline 页映射到最高地址
+// 在用户态和内核空间中可访问
 #define TRAMPOLINE (MAXVA - PGSIZE)
 
-// map kernel stacks beneath the trampoline,
-// each surrounded by invalid guard pages.
+// 在 trampoline 之下映射内核栈，每个内核栈都被无效的保护页guard pages包围。2页，guard 页不主动映射即可。
 #define KSTACK(p) (TRAMPOLINE - ((p)+1)* 2*PGSIZE)
 
-// User memory layout.
-// Address zero first:
-//   text
-//   original data and bss
-//   fixed-size stack
-//   expandable heap
+// 用户内存布局。
+// 地址从 0 开始：
+//   程序代码段（text）
+//   初始化的数据段和未初始化的数据段（bss）
+//   固定大小的用户栈
+//   可扩展的堆
 //   ...
-//   TRAPFRAME (p->trapframe, used by the trampoline)
-//   TRAMPOLINE (the same page as in the kernel)
+//   TRAPFRAME（p->trapframe，由 trampoline 使用）
+//   TRAMPOLINE（与内核中相同的一页）
 #define TRAPFRAME (TRAMPOLINE - PGSIZE)
