@@ -432,3 +432,33 @@ copyinstr(pagetable_t pagetable, char *dst, uint64 srcva, uint64 max)
     return -1;
   }
 }
+
+// 递归打印页表
+int 
+pgtblprint(pagetable_t pagetable, int depth){
+  
+  for(int i = 0; i<512 ; i++){
+    pte_t pte = pagetable[i];
+    if(pte & PTE_V){
+      printf("..");
+      for(int j=depth;j;j--)printf(" ..");
+      printf("%d: pte %p pa %p\n", i, pte, PTE2PA(pte));
+
+      // 若不是页节点,递归打印
+      if ((pte & (PTE_R | PTE_W | PTE_X)) == 0) {
+        uint64 child = PTE2PA(pte);
+        pgtblprint((pagetable_t)child,depth+1);
+      }
+    }
+  }
+  return 0;
+}
+
+// 打印有效页表
+int
+vmprint(pagetable_t pagetable){
+  printf("page table %p\n", pagetable);
+  return pgtblprint(pagetable, 0);
+}
+
+

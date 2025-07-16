@@ -70,9 +70,10 @@
 //   TRAPFRAME (p->trapframe, used by the trampoline)
 //   TRAMPOLINE (the same page as in the kernel)
 #define TRAPFRAME (TRAMPOLINE - PGSIZE)
+
+// 定义了用户内核共享页表，加速系统调用（用户只读）
 #ifdef LAB_PGTBL
 #define USYSCALL (TRAPFRAME - PGSIZE)
-
 struct usyscall {
   int pid;  // Process ID
 };
