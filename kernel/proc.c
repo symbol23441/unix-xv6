@@ -384,8 +384,9 @@ exit(int status)
   panic("zombie exit");
 }
 
-// Wait for a child process to exit and return its pid.
-// Return -1 if this process has no children.
+// 等待一个子进程的退出，并返回他的pid
+// 如果这个进程没有子进程则返回-1
+// 通过addr地址，回传进程的退出状态xstate。
 int
 wait(uint64 addr)
 {
@@ -396,16 +397,15 @@ wait(uint64 addr)
   acquire(&wait_lock);
 
   for(;;){
-    // Scan through table looking for exited children.
+    // 扫描进程表，寻找已退出的子进程
     havekids = 0;
     for(np = proc; np < &proc[NPROC]; np++){
       if(np->parent == p){
-        // make sure the child isn't still in exit() or swtch().
+        // 确保子进程不处于exit() or swtch().
         acquire(&np->lock);
 
         havekids = 1;
         if(np->state == ZOMBIE){
-          // Found one.
           pid = np->pid;
           if(addr != 0 && copyout(p->pagetable, addr, (char *)&np->xstate,
                                   sizeof(np->xstate)) < 0) {
@@ -422,24 +422,23 @@ wait(uint64 addr)
       }
     }
 
-    // No point waiting if we don't have any children.
+    // 如果我们没有任何子进程，等待就没有意义了。
     if(!havekids || p->killed){
       release(&wait_lock);
       return -1;
     }
     
-    // Wait for a child to exit.
+    // 睡眠等待一个子进程退出（会释放wait_lock,唤醒后重新获取）
     sleep(p, &wait_lock);  //DOC: wait-sleep
   }
 }
 
-// Per-CPU process scheduler.
-// Each CPU calls scheduler() after setting itself up.
-// Scheduler never returns.  It loops, doing:
-//  - choose a process to run.
-//  - swtch to start running that process.
-//  - eventually that process transfers control
-//    via swtch back to the scheduler.
+// 每个 CPU 的进程调度器。
+// 每个 CPU 在完成自身初始化后都会调用 scheduler()。
+// scheduler 永不返回。它不断循环，执行以下操作：
+//  - 选择一个要运行的进程。
+//  - 切换（swtch）到该进程，开始执行。
+//  - 最终，该进程通过 swtch 将控制权切换回调度器。
 void
 scheduler(void)
 {
@@ -448,35 +447,36 @@ scheduler(void)
   
   c->proc = 0;
   for(;;){
-    // Avoid deadlock by ensuring that devices can interrupt.
+    // 通过确保设备能够被中断，避免死锁
     intr_on();
 
     for(p = proc; p < &proc[NPROC]; p++) {
       acquire(&p->lock);
       if(p->state == RUNNABLE) {
-        // Switch to chosen process.  It is the process's job
-        // to release its lock and then reacquire it
-        // before jumping back to us.
+        // 切换到选中的进程。接下来的事情由该进程负责；
+        // 它必须释放自己的锁，然后在调回我们(调度器)之前重新获取锁
         p->state = RUNNING;
         c->proc = p;
         swtch(&c->context, &p->context);
 
-        // Process is done running for now.
-        // It should have changed its p->state before coming back.
-        c->proc = 0;
+        // 该进程此时已经暂时运行完毕。
+        // 它在返回到这里之前，应该已经修改了它自己的 p->state 状态。
+        c->proc = 0;    // 表明当前cpu空闲，并且正在执行调度
       }
       release(&p->lock);
     }
   }
 }
 
-// Switch to scheduler.  Must hold only p->lock
-// and have changed proc->state. Saves and restores
-// intena because intena is a property of this
-// kernel thread, not this CPU. It should
-// be proc->intena and proc->noff, but that would
-// break in the few places where a lock is held but
-// there's no process.
+// 切换到调度器（scheduler）。必须只持有 p->lock，
+// 并且已经修改了 proc->state。
+// 之所以保存和恢复 intena，是因为 intena 是这个内核线程的属性，
+// 而不是这个 CPU 的属性。严格来说，它应该是 proc->intena 和 proc->noff，
+// 但在某些持有锁但当前没有进程的地方，这样做会出错。
+
+// sched 当前进程主动退出、或定时器触发 主动执行进程切换
+// 切换回scheduler()
+// 由 exit()、yield()、sleep() 其中一个跳入
 void
 sched(void)
 {
@@ -485,19 +485,19 @@ sched(void)
 
   if(!holding(&p->lock))
     panic("sched p->lock");
-  if(mycpu()->noff != 1)
+  if(mycpu()->noff != 1)  // 必须在最外层的中断嵌套关闭中
     panic("sched locks");
   if(p->state == RUNNING)
     panic("sched running");
   if(intr_get())
     panic("sched interruptible");
 
-  intena = mycpu()->intena;
+  intena = mycpu()->intena;  // 暂存中断使能
   swtch(&p->context, &mycpu()->context);
   mycpu()->intena = intena;
 }
 
-// Give up the CPU for one scheduling round.
+// 为了一次进程调度，放弃CPU
 void
 yield(void)
 {
@@ -508,20 +508,19 @@ yield(void)
   release(&p->lock);
 }
 
-// A fork child's very first scheduling by scheduler()
-// will swtch to forkret.
+// 调度器第一次调度一个通过 fork 创建的子进程时，会通过 swtch 切换到 forkret 函数。
+// 第一个进程初始化，和会从次启动
 void
 forkret(void)
 {
   static int first = 1;
 
-  // Still holding p->lock from scheduler.
+  // 仍然持有进程锁，来自scheduler.
   release(&myproc()->lock);
 
   if (first) {
-    // File system initialization must be run in the context of a
-    // regular process (e.g., because it calls sleep), and thus cannot
-    // be run from main().
+    // 文件系统的初始化必须在一个常规进程的上下文中运行（例如，它会调用 sleep），
+    // 因此不能在 main() 函数中执行。而在第一次运行进程进行初始化。
     first = 0;
     fsinit(ROOTDEV);
   }
@@ -529,21 +528,18 @@ forkret(void)
   usertrapret();
 }
 
-// Atomically release lock and sleep on chan.
-// Reacquires lock when awakened.
+// 原子地释放锁并在 chan 上睡眠。
+// 当被唤醒时，会重新获取该锁。
 void
 sleep(void *chan, struct spinlock *lk)
 {
   struct proc *p = myproc();
   
-  // Must acquire p->lock in order to
-  // change p->state and then call sched.
-  // Once we hold p->lock, we can be
-  // guaranteed that we won't miss any wakeup
-  // (wakeup locks p->lock),
-  // so it's okay to release lk.
-
-  acquire(&p->lock);  //DOC: sleeplock1
+  // 1、必须先获取 p->lock，才能修改 p->state 并调用 sched。
+  // 2、一旦我们持有了 p->lock，就可以保证不会错过任何 wakeup（因为 wakeup 也会加锁 p->lock），
+  // 防止在此刻到切换到进程调度的期间，错过了wake。这次对应的锁释放回调swich()后，scheduler()中释放
+  // 因此，此时释放 lk（sleep 时传入的锁）是安全的。
+  acquire(&p->lock);  
   release(lk);
 
   // Go to sleep.
@@ -552,16 +548,15 @@ sleep(void *chan, struct spinlock *lk)
 
   sched();
 
-  // Tidy up.
+  // 清空等待的事件链
   p->chan = 0;
 
-  // Reacquire original lock.
-  release(&p->lock);
-  acquire(lk);
+  release(&p->lock);    // 释放调度切换前加上的进程锁
+  acquire(lk);          // 重新获取原先的锁。
 }
 
-// Wake up all processes sleeping on chan.
-// Must be called without any p->lock.
+// 唤醒所有在 chan 上睡眠的进程。
+// 调用此函数时，不能持有任何 p->lock。
 void
 wakeup(void *chan)
 {
@@ -578,9 +573,9 @@ wakeup(void *chan)
   }
 }
 
-// Kill the process with the given pid.
-// The victim won't exit until it tries to return
-// to user space (see usertrap() in trap.c).
+// 杀死指定 pid 的进程。
+// 被杀的进程不会立刻退出，
+// 它会在尝试返回用户空间时才会退出（参见 trap.c 中的 usertrap()）。
 int
 kill(int pid)
 {
@@ -591,7 +586,7 @@ kill(int pid)
     if(p->pid == pid){
       p->killed = 1;
       if(p->state == SLEEPING){
-        // Wake process from sleep().
+        // 唤醒睡眠的进程
         p->state = RUNNABLE;
       }
       release(&p->lock);
@@ -602,9 +597,8 @@ kill(int pid)
   return -1;
 }
 
-// Copy to either a user address, or kernel address,
-// depending on usr_dst.
-// Returns 0 on success, -1 on error.
+// 根据 usr_dst 的值，将数据从内核复制到用户地址或内核地址。
+// 成功时返回 0，出错时返回 -1。
 int
 either_copyout(int user_dst, uint64 dst, void *src, uint64 len)
 {
@@ -617,7 +611,8 @@ either_copyout(int user_dst, uint64 dst, void *src, uint64 len)
   }
 }
 
-// Copy from either a user address, or kernel address,depending on usr_src.
+
+// 将数据复制到内核
 // 根据 user_src 的值，从用户地址或内核地址复制数据。
 // 成功返回 0，失败返回 -1。
 int
@@ -632,9 +627,9 @@ either_copyin(void *dst, int user_src, uint64 src, uint64 len)
   }
 }
 
-// Print a process listing to console.  For debugging.
-// Runs when user types ^P on console.
-// No lock to avoid wedging a stuck machine further.
+// 将进程列表打印到控制台，用于调试。
+// 当用户在控制台输入 ^P 时触发运行。
+// 不加锁，以避免在系统卡住时进一步死锁。
 void
 procdump(void)
 {

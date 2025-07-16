@@ -75,7 +75,7 @@ usertrap(void)
   if(p->killed)
     exit(-1);
 
-  // 其他的设备中断已经在
+  // 其他的设备中断已经在devintr() 处理
   // 定时器中断。则放弃CPU，进入进程切换。
   if(which_dev == 2)
     yield();
@@ -106,7 +106,7 @@ usertrapret(void)
 
   // 设置好相关寄存器，为 trampoline.S's sret 返回用户空间
   
-  // set S Previous Privilege mode to User.
+  // set S Previous Privilege mode to User. 真正转换在sret是触发。
   unsigned long x = r_sstatus();
   x &= ~SSTATUS_SPP; // 为用户模式 清空SPP状态置0
   x |= SSTATUS_SPIE; // 启动用户模式下的中断

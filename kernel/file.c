@@ -25,7 +25,7 @@ fileinit(void)
   initlock(&ftable.lock, "ftable");
 }
 
-// Allocate a file structure.
+// 分配一个文件结构
 struct file*
 filealloc(void)
 {
@@ -82,8 +82,9 @@ fileclose(struct file *f)
   }
 }
 
-// Get metadata about file f.
-// addr is a user virtual address, pointing to a struct stat.
+
+// 获取文件 f 的元数据信息。
+// addr 是一个用户虚拟地址，指向一个 struct stat 结构体。
 int
 filestat(struct file *f, uint64 addr)
 {
@@ -92,17 +93,17 @@ filestat(struct file *f, uint64 addr)
   
   if(f->type == FD_INODE || f->type == FD_DEVICE){
     ilock(f->ip);
-    stati(f->ip, &st);
+    stati(f->ip, &st);      // 获取inode stat
     iunlock(f->ip);
-    if(copyout(p->pagetable, addr, (char *)&st, sizeof(st)) < 0)
+    if(copyout(p->pagetable, addr, (char *)&st, sizeof(st)) < 0)  // 复制到用户空间
       return -1;
     return 0;
   }
   return -1;
 }
 
-// Read from file f.
-// addr is a user virtual address.
+// 从文件f读取
+// addr 是用户虚拟地址
 int
 fileread(struct file *f, uint64 addr, int n)
 {

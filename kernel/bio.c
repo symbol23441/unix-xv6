@@ -1,18 +1,3 @@
-// Buffer cache.
-//
-// The buffer cache is a linked list of buf structures holding
-// cached copies of disk block contents.  Caching disk blocks
-// in memory reduces the number of disk reads and also provides
-// a synchronization point for disk blocks used by multiple processes.
-//
-// Interface:
-// * To get a buffer for a particular disk block, call bread.
-// * After changing buffer data, call bwrite to write it to disk.
-// * When done with the buffer, call brelse.
-// * Do not use the buffer after calling brelse.
-// * Only one process at a time can use a buffer,
-//     so do not keep them longer than necessary.
-
 // 缓冲区缓存。
 
 // 缓冲区缓存是一个由 buf 结构组成的链表，保存了磁盘块内容的缓存副本。
@@ -41,9 +26,9 @@ struct {
   struct spinlock lock;
   struct buf buf[NBUF];
 
-  // Linked list of all buffers, through prev/next.
-  // Sorted by how recently the buffer was used.
-  // head.next is most recent, head.prev is least.
+  // 所有缓冲区的链表，通过 prev/next 链接。
+  // 按照缓冲区最近使用的顺序排序。
+  // head.next 是最近使用的，head.prev 是最久未使用的。
   struct buf head;
 } bcache;
 
@@ -54,7 +39,7 @@ binit(void)
 
   initlock(&bcache.lock, "bcache");
 
-  // Create linked list of buffers
+  // 创建buffer链表
   bcache.head.prev = &bcache.head;
   bcache.head.next = &bcache.head;
   for(b = bcache.buf; b < bcache.buf+NBUF; b++){
@@ -66,9 +51,9 @@ binit(void)
   }
 }
 
-// Look through buffer cache for block on device dev.
-// If not found, allocate a buffer.
-// In either case, return locked buffer.
+// 在缓冲区缓存中查找设备 dev 上的块。
+// 如果未找到，则分配一个缓冲区。
+// 无论哪种情况，都返回加锁的缓冲区。
 static struct buf*
 bget(uint dev, uint blockno)
 {
@@ -76,7 +61,7 @@ bget(uint dev, uint blockno)
 
   acquire(&bcache.lock);
 
-  // Is the block already cached?
+  // 该块数据是否已经被缓存
   for(b = bcache.head.next; b != &bcache.head; b = b->next){
     if(b->dev == dev && b->blockno == blockno){
       b->refcnt++;
@@ -86,8 +71,8 @@ bget(uint dev, uint blockno)
     }
   }
 
-  // Not cached.
-  // Recycle the least recently used (LRU) unused buffer.
+  // 未缓存
+  // 回收最久未使用的空闲缓冲区（LRU，least recently used ）。
   for(b = bcache.head.prev; b != &bcache.head; b = b->prev){
     if(b->refcnt == 0) {
       b->dev = dev;
@@ -102,7 +87,8 @@ bget(uint dev, uint blockno)
   panic("bget: no buffers");
 }
 
-// Return a locked buf with the contents of the indicated block.
+// 返回一个加锁的缓冲区，包含指定块的内容。
+// 从块设备（如磁盘）读取数据
 struct buf*
 bread(uint dev, uint blockno)
 {
@@ -116,7 +102,8 @@ bread(uint dev, uint blockno)
   return b;
 }
 
-// Write b's contents to disk.  Must be locked.
+// 将缓存块的内容写到磁盘
+// 必须持有锁
 void
 bwrite(struct buf *b)
 {
@@ -125,8 +112,8 @@ bwrite(struct buf *b)
   virtio_disk_rw(b, 1);
 }
 
-// Release a locked buffer.
-// Move to the head of the most-recently-used list.
+// 释放一个持有锁的缓存
+// 头插法插入循环链表（表示最近使用）
 void
 brelse(struct buf *b)
 {

@@ -205,14 +205,15 @@ commit()
   }
 }
 
-// Caller has modified b->data and is done with the buffer.
-// Record the block number and pin in the cache by increasing refcnt.
-// commit()/write_log() will do the disk write.
+// 调用者已经修改了 b->data，并且完成了对缓冲区的使用。
+// 通过增加 refcnt 来记录块号并将缓冲区固定在缓存中。
+// 实际的磁盘写操作由 commit()/write_log() 完成。
 //
-// log_write() replaces bwrite(); a typical use is:
-//   bp = bread(...)
-//   modify bp->data[]
-//   log_write(bp)
+// log_write() 替代了 bwrite()；典型的使用方式是：
+//   bp = bread(...)        // 读取块
+//   修改 bp->data[]        // 修改数据
+//   log_write(bp)         // 写入日志（记录修改）
+//   brelse(bp)            // 释放缓冲区
 //   brelse(bp)
 void
 log_write(struct buf *b)
@@ -226,11 +227,11 @@ log_write(struct buf *b)
     panic("log_write outside of trans");
 
   for (i = 0; i < log.lh.n; i++) {
-    if (log.lh.block[i] == b->blockno)   // log absorption
+    if (log.lh.block[i] == b->blockno)   // 日志吸收（Log Absorption），合并对同一数据块的多次写入操作
       break;
   }
   log.lh.block[i] = b->blockno;
-  if (i == log.lh.n) {  // Add new block to log?
+  if (i == log.lh.n) {  // 添加一个新的块到日志中 
     bpin(b);
     log.lh.n++;
   }

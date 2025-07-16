@@ -21,43 +21,43 @@ exec(char *path, char **argv)
   pagetable_t pagetable = 0, oldpagetable;
   struct proc *p = myproc();
 
-  begin_op();
+  begin_op();                                                      // 文件系统操作事务启动
 
-  if((ip = namei(path)) == 0){
+  if((ip = namei(path)) == 0){                                     // 根据路径找到文件的 inode。
     end_op();
     return -1;
   }
-  ilock(ip);
+  ilock(ip);                                                       // 加锁文件，准备读取内容。
 
   // 检查ELF头部
-  if(readi(ip, 0, (uint64)&elf, 0, sizeof(elf)) != sizeof(elf))
+  if(readi(ip, 0, (uint64)&elf, 0, sizeof(elf)) != sizeof(elf))   // 从文件中读取 ELF 文件头。
     goto bad;
-  if(elf.magic != ELF_MAGIC)
+  if(elf.magic != ELF_MAGIC)                                      // 检查魔数是否为 0x464C457F（即 "\x7FELF"），确认文件是合法的 ELF 文件。
     goto bad;
 
-  if((pagetable = proc_pagetable(p)) == 0)
+  if((pagetable = proc_pagetable(p)) == 0)                        // 为新程序分配一个干净的用户页表。
     goto bad;
 
   // 将程序加载进内存
   for(i=0, off=elf.phoff; i<elf.phnum; i++, off+=sizeof(ph)){
-    if(readi(ip, 0, (uint64)&ph, off, sizeof(ph)) != sizeof(ph))
+    if(readi(ip, 0, (uint64)&ph, off, sizeof(ph)) != sizeof(ph))  // 遍历 ELF 文件的所有 Program Header。
       goto bad;
-    if(ph.type != ELF_PROG_LOAD)
+    if(ph.type != ELF_PROG_LOAD)                                  // 只处理 PT_LOAD 类型的段（用于真正加载的代码/数据）。
       continue;
-    if(ph.memsz < ph.filesz)
+    if(ph.memsz < ph.filesz)                                      // 安全性检查
       goto bad;
-    if(ph.vaddr + ph.memsz < ph.vaddr)
+    if(ph.vaddr + ph.memsz < ph.vaddr)                            // 溢出检查
       goto bad;
     uint64 sz1;
-    if((sz1 = uvmalloc(pagetable, sz, ph.vaddr + ph.memsz)) == 0)
+    if((sz1 = uvmalloc(pagetable, sz, ph.vaddr + ph.memsz)) == 0) // 该段在虚拟地址空间中分配足够内存
       goto bad;
     sz = sz1;
-    if((ph.vaddr % PGSIZE) != 0)
+    if((ph.vaddr % PGSIZE) != 0)                                  // 检查段地址是否按页对齐。
       goto bad;
-    if(loadseg(pagetable, ph.vaddr, ip, ph.off, ph.filesz) < 0)
+    if(loadseg(pagetable, ph.vaddr, ip, ph.off, ph.filesz) < 0)   // 从文件中读取段的内容到指定虚拟地址。
       goto bad;
   }
-  iunlockput(ip);
+  iunlockput(ip);                                                 // 清理 inode，准备进入用户态
   end_op();
   ip = 0;
 
@@ -71,7 +71,7 @@ exec(char *path, char **argv)
   if((sz1 = uvmalloc(pagetable, sz, sz + 2*PGSIZE)) == 0)
     goto bad;
   sz = sz1;
-  uvmclear(pagetable, sz-2*PGSIZE);
+  uvmclear(pagetable, sz-2*PGSIZE); // 守护页不可访问
   sp = sz;
   stackbase = sp - PGSIZE;     // stackbase为栈基地址，栈页开始的虚拟地址低地址。sp为栈顶，从栈页高地址向下生长。另外bp会记录当前函数的基地址。函数调用会将
 

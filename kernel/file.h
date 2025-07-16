@@ -1,13 +1,13 @@
 // file ：是inode引用+打开状态
 struct file {
-  enum { FD_NONE, FD_PIPE, FD_INODE, FD_DEVICE } type;
-  int ref; // reference count
-  char readable;
-  char writable;
+  enum { FD_NONE, FD_PIPE, FD_INODE, FD_DEVICE } type;  // 文件类型：无效、管道、 文件inode、设备文件
+  int ref;            // 引用计数
+  char readable;      // 可读
+  char writable;      // 可写
   struct pipe *pipe; // FD_PIPE
   struct inode *ip;  // FD_INODE and FD_DEVICE
   uint off;          // FD_INODE
-  short major;       // FD_DEVICE
+  short major;       // FD_DEVICE 主设备号
 };
 
 #define major(dev)  ((dev) >> 16 & 0xFFFF)

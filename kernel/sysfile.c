@@ -37,8 +37,8 @@ argfd(int n, int *pfd, struct file **pf)
   return 0;
 }
 
-// Allocate a file descriptor for the given file.
-// Takes over file reference from caller on success.
+// 为指定的文件分配一个文件描述符。
+// 分配成功后，接管调用者对该文件的引用。
 static int
 fdalloc(struct file *f)
 {
@@ -62,9 +62,9 @@ sys_dup(void)
 
   if(argfd(0, 0, &f) < 0)
     return -1;
-  if((fd=fdalloc(f)) < 0)
+  if((fd=fdalloc(f)) < 0) // 分配新fd
     return -1;
-  filedup(f);
+  filedup(f);             // 文件引用+1
   return fd;
 }
 
@@ -110,14 +110,14 @@ uint64
 sys_fstat(void)
 {
   struct file *f;
-  uint64 st; // user pointer to struct stat
+  uint64 st; // struct stat指针
 
   if(argfd(0, 0, &f) < 0 || argaddr(1, &st) < 0)
     return -1;
   return filestat(f, st);
 }
 
-// Create the path new as a link to the same inode as old.
+// 创建一个路径 new，作为指向 old 所在 inode 的链接。
 uint64
 sys_link(void)
 {
@@ -128,6 +128,7 @@ sys_link(void)
     return -1;
 
   begin_op();
+  // 读取old inode，索引+1
   if((ip = namei(old)) == 0){
     end_op();
     return -1;
@@ -144,10 +145,11 @@ sys_link(void)
   iupdate(ip);
   iunlock(ip);
 
+  // 读取new的父目录inode，插入目录项
   if((dp = nameiparent(new, name)) == 0)
     goto bad;
   ilock(dp);
-  if(dp->dev != ip->dev || dirlink(dp, name, ip->inum) < 0){
+  if(dp->dev != ip->dev || dirlink(dp, name, ip->inum) < 0){  // 禁止设备硬链接||创建链接
     iunlockput(dp);
     goto bad;
   }
@@ -246,20 +248,23 @@ create(char *path, short type, short major, short minor)
   struct inode *ip, *dp;
   char name[DIRSIZ];
 
+  // 获取路径父节点
   if((dp = nameiparent(path, name)) == 0)
     return 0;
 
   ilock(dp);
 
+  // 路径查询，若已存在该节点则失败
   if((ip = dirlookup(dp, name, 0)) != 0){
     iunlockput(dp);
     ilock(ip);
-    if(type == T_FILE && (ip->type == T_FILE || ip->type == T_DEVICE))
+    if(type == T_FILE && (ip->type == T_FILE || ip->type == T_DEVICE)) // 若要创建是普通文件，且已存在同名的普通文件or设备文件，直接返回该ip
       return ip;
     iunlockput(ip);
     return 0;
   }
 
+  // 无该文件，则分配inode
   if((ip = ialloc(dp->dev, type)) == 0)
     panic("create: ialloc");
 
@@ -268,7 +273,7 @@ create(char *path, short type, short major, short minor)
   ip->minor = minor;
   ip->nlink = 1;
   iupdate(ip);
-
+  // 若目录文件，
   if(type == T_DIR){  // Create . and .. entries.
     dp->nlink++;  // for ".."
     iupdate(dp);
@@ -277,6 +282,7 @@ create(char *path, short type, short major, short minor)
       panic("create dots");
   }
 
+  // 目录项插入父节点
   if(dirlink(dp, name, ip->inum) < 0)
     panic("create: dirlink");
 
@@ -311,19 +317,20 @@ sys_open(void)
       return -1;
     }
     ilock(ip);
-    if(ip->type == T_DIR && omode != O_RDONLY){
+    if(ip->type == T_DIR && omode != O_RDONLY){   // 目录不能read、write
       iunlockput(ip);
       end_op();
       return -1;
     }
   }
 
+  // 设备文件检查设备号合法
   if(ip->type == T_DEVICE && (ip->major < 0 || ip->major >= NDEV)){
     iunlockput(ip);
     end_op();
     return -1;
   }
-
+  // 分配file管理结构、分配fd
   if((f = filealloc()) == 0 || (fd = fdalloc(f)) < 0){
     if(f)
       fileclose(f);
@@ -332,6 +339,7 @@ sys_open(void)
     return -1;
   }
 
+  // 初始f
   if(ip->type == T_DEVICE){
     f->type = FD_DEVICE;
     f->major = ip->major;
@@ -343,6 +351,7 @@ sys_open(void)
   f->readable = !(omode & O_WRONLY);
   f->writable = (omode & O_WRONLY) || (omode & O_RDWR);
 
+  // 若为O_TRUNC，则清空原文件内容
   if((omode & O_TRUNC) && ip->type == T_FILE){
     itrunc(ip);
   }
@@ -353,6 +362,7 @@ sys_open(void)
   return fd;
 }
 
+// 创建路径
 uint64
 sys_mkdir(void)
 {
@@ -369,6 +379,8 @@ sys_mkdir(void)
   return 0;
 }
 
+// 内核用于创建设备文件（特殊文件）的系统调用实现
+// 将一个路径映射为类型为 T_DEVICE 的 inode，并设置主设备号和次设备号，以便与设备驱动关联。
 uint64
 sys_mknod(void)
 {
@@ -389,6 +401,7 @@ sys_mknod(void)
   return 0;
 }
 
+// 将当前进程的工作目录（cwd）切换到用户指定的路径。
 uint64
 sys_chdir(void)
 {
@@ -397,11 +410,11 @@ sys_chdir(void)
   struct proc *p = myproc();
   
   begin_op();
-  if(argstr(0, path, MAXPATH) < 0 || (ip = namei(path)) == 0){
+  if(argstr(0, path, MAXPATH) < 0 || (ip = namei(path)) == 0){ // 参数0获取路径，加载目录文件inode
     end_op();
     return -1;
   }
-  ilock(ip);
+  ilock(ip);                        // inode 加锁并读取
   if(ip->type != T_DIR){
     iunlockput(ip);
     end_op();
@@ -459,17 +472,17 @@ sys_exec(void)
 uint64
 sys_pipe(void)
 {
-  uint64 fdarray; // user pointer to array of two integers
+  uint64 fdarray; // 指向两个整数数组的用户空间指针
   struct file *rf, *wf;
   int fd0, fd1;
   struct proc *p = myproc();
 
-  if(argaddr(0, &fdarray) < 0)
+  if(argaddr(0, &fdarray) < 0)      // 从参数0加载数组地址
     return -1;
-  if(pipealloc(&rf, &wf) < 0)
+  if(pipealloc(&rf, &wf) < 0)       // 管道创建分配
     return -1;
   fd0 = -1;
-  if((fd0 = fdalloc(rf)) < 0 || (fd1 = fdalloc(wf)) < 0){
+  if((fd0 = fdalloc(rf)) < 0 || (fd1 = fdalloc(wf)) < 0){ // 分配文件描述符。失败，释放资源
     if(fd0 >= 0)
       p->ofile[fd0] = 0;
     fileclose(rf);
@@ -477,7 +490,7 @@ sys_pipe(void)
     return -1;
   }
   if(copyout(p->pagetable, fdarray, (char*)&fd0, sizeof(fd0)) < 0 ||
-     copyout(p->pagetable, fdarray+sizeof(fd0), (char *)&fd1, sizeof(fd1)) < 0){
+     copyout(p->pagetable, fdarray+sizeof(fd0), (char *)&fd1, sizeof(fd1)) < 0){  // 将值输出给用户空间。失败，释放资源
     p->ofile[fd0] = 0;
     p->ofile[fd1] = 0;
     fileclose(rf);

@@ -11,12 +11,12 @@
 #define PIPESIZE 512
 
 struct pipe {
-  struct spinlock lock;
-  char data[PIPESIZE];
-  uint nread;     // number of bytes read
-  uint nwrite;    // number of bytes written
-  int readopen;   // read fd is still open
-  int writeopen;  // write fd is still open
+  struct spinlock lock;     // 自旋锁
+  char data[PIPESIZE];      // 管道缓冲区
+  uint nread;               // 已读取的字节数（读指针）
+  uint nwrite;              // 已写入的字节数（写指针）
+  int readopen;             // 读端是否仍然打开（1 打开，0 已关闭）
+  int writeopen;            // 写端是否仍然打开（1 打开，0 已关闭）
 };
 
 int
@@ -26,20 +26,20 @@ pipealloc(struct file **f0, struct file **f1)
 
   pi = 0;
   *f0 = *f1 = 0;
-  if((*f0 = filealloc()) == 0 || (*f1 = filealloc()) == 0)
+  if((*f0 = filealloc()) == 0 || (*f1 = filealloc()) == 0)  // 分配文件管理结构
     goto bad;
-  if((pi = (struct pipe*)kalloc()) == 0)
+  if((pi = (struct pipe*)kalloc()) == 0)                    // 分配一页用于pipe文件结构
     goto bad;
-  pi->readopen = 1;
+  pi->readopen = 1;                                         // 管道设置
   pi->writeopen = 1;
   pi->nwrite = 0;
   pi->nread = 0;
-  initlock(&pi->lock, "pipe");
-  (*f0)->type = FD_PIPE;
+  initlock(&pi->lock, "pipe");                              // 初始化管道锁
+  (*f0)->type = FD_PIPE;                                    // f0 读端设置
   (*f0)->readable = 1;
   (*f0)->writable = 0;
   (*f0)->pipe = pi;
-  (*f1)->type = FD_PIPE;
+  (*f1)->type = FD_PIPE;                                    // f1 写端设置
   (*f1)->readable = 0;
   (*f1)->writable = 1;
   (*f1)->pipe = pi;
@@ -47,7 +47,7 @@ pipealloc(struct file **f0, struct file **f1)
 
  bad:
   if(pi)
-    kfree((char*)pi);
+    kfree((char*)pi);                                       // 失败，释放相应结构
   if(*f0)
     fileclose(*f0);
   if(*f1)
@@ -55,6 +55,9 @@ pipealloc(struct file **f0, struct file **f1)
   return -1;
 }
 
+
+// pipe 关闭
+// 两方close才真正关闭。第一方关闭后，唤醒另一方。
 void
 pipeclose(struct pipe *pi, int writable)
 {

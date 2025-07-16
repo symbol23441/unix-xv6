@@ -357,10 +357,9 @@ sfence_vma()
 #define PXSHIFT(level)  (PGSHIFT+(9*(level)))                           // 提取第 level 级页表索引时，虚拟地址需要右移的位数
 #define PX(level, va) ((((uint64) (va)) >> PXSHIFT(level)) & PXMASK)    // 虚拟地址转页表项数组索引(PET index)
 
-// one beyond the highest possible virtual address.
-// MAXVA is actually one bit less than the max allowed by
-// Sv39, to avoid having to sign-extend virtual addresses
-// that have the high bit set.
+// 超过所有可能虚拟地址的一个值（即地址空间的上界）
+// 实际上，MAXVA 比 Sv39 支持的最大虚拟地址少一个最高位（少1位），
+// 是为了避免处理那些高位为1时需要进行符号扩展（sign-extend）的问题。
 #define MAXVA (1L << (9 + 9 + 9 + 12 - 1))
 
 

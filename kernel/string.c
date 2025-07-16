@@ -50,7 +50,7 @@ memmove(void *dst, const void *src, uint n)
   return dst;
 }
 
-// memcpy exists to placate GCC.  Use memmove.
+// 声明memcpy，防止GCC内建
 void*
 memcpy(void *dst, const void *src, uint n)
 {

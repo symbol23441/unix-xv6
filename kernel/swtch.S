@@ -1,15 +1,16 @@
-# Context switch
+# Context switch 上下文切换
 #
 #   void swtch(struct context *old, struct context *new);
-# 
-# Save current registers in old. Load from new.	
+#
+# 保存当前寄存器到old，并且加载新的
 
 
 .globl swtch
 swtch:
-        sd ra, 0(a0)
-        sd sp, 8(a0)
-        sd s0, 16(a0)
+# --- 保存当前进程的寄存器到 old context（*a0） ---
+        sd ra, 0(a0)            # 返回地址
+        sd sp, 8(a0)            # 栈指针
+        sd s0, 16(a0)           # 保存callee-saved 寄存器 s0 - s11
         sd s1, 24(a0)
         sd s2, 32(a0)
         sd s3, 40(a0)
@@ -22,6 +23,7 @@ swtch:
         sd s10, 96(a0)
         sd s11, 104(a0)
 
+#  --- 恢复新进程的寄存器状态（*a1） ---
         ld ra, 0(a1)
         ld sp, 8(a1)
         ld s0, 16(a1)

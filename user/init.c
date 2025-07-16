@@ -37,17 +37,16 @@ main(void)
     }
 
     for(;;){
-      // this call to wait() returns if the shell exits,
-      // or if a parentless process exits.
+      // 若shell或无父进程的进程退出，该wait() 将会返回，并唤醒。
       wpid = wait((int *) 0);
       if(wpid == pid){
-        // the shell exited; restart it.
+        // shell退出，则重启shell
         break;
       } else if(wpid < 0){
         printf("init: wait returned an error\n");
         exit(1);
       } else {
-        // it was a parentless process; do nothing.
+        // 无父进程的进程退出;不做额外处理
       }
     }
   }

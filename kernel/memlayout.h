@@ -1,23 +1,23 @@
-// Physical memory layout
+// 物理内存布局
 
-// qemu -machine virt is set up like this,
-// based on qemu's hw/riscv/virt.c:
+// qemu -machine virt 的布局如下，
+// 参考自 qemu 的 hw/riscv/virt.c 文件：
 //
-// 00001000 -- boot ROM, provided by qemu
-// 02000000 -- CLINT
-// 0C000000 -- PLIC
-// 10000000 -- uart0 
-// 10001000 -- virtio disk 
-// 80000000 -- boot ROM jumps here in machine mode
-//             -kernel loads the kernel here
-// unused RAM after 80000000.
+// 00001000 -- 引导 ROM，由 qemu 提供
+// 02000000 -- CLINT（Core Local Interruptor）
+// 0C000000 -- PLIC（Platform-Level Interrupt Controller）
+// 10000000 -- uart0 串口设备
+// 10001000 -- virtio 虚拟磁盘设备
+// 80000000 -- 启动 ROM 在机器模式下跳转到这里
+//             - 内核从这里加载
+// 80000000 之后的未使用内存为可用 RAM。
 
-// the kernel uses physical memory thus:
-// 80000000 -- entry.S, then kernel text and data
-// end -- start of kernel page allocation area
-// PHYSTOP -- end RAM used by the kernel
+// 内核使用物理内存的方式如下：
+// 80000000 -- entry.S 入口代码，接着是内核代码段和数据段
+// end -- 内核页分配区域的起始位置
+// PHYSTOP -- 内核使用的 RAM 的结束位置
 
-// qemu puts UART registers here in physical memory.
+// qemu 将 UART（串口）寄存器映射在物理内存的这个位置。
 #define UART0 0x10000000L
 #define UART0_IRQ 10
 
@@ -25,25 +25,25 @@
 #define VIRTIO0 0x10001000
 #define VIRTIO0_IRQ 1
 
-// core local interruptor (CLINT), which contains the timer.
+// core local interruptor (CLINT), 内核本地中断，包括定时器timer、软件中断
 #define CLINT 0x2000000L
-#define CLINT_MTIMECMP(hartid) (CLINT + 0x4000 + 8*(hartid))
-#define CLINT_MTIME (CLINT + 0xBFF8) // cycles since boot.
+#define CLINT_MTIMECMP(hartid) (CLINT + 0x4000 + 8*(hartid))        // 每个cpu核心 定时器比较寄存器的地址
+#define CLINT_MTIME (CLINT + 0xBFF8) // 机器时间寄存器地址，用于记录从系统启动以来经过的时钟周期数
 
-// qemu puts platform-level interrupt controller (PLIC) here.
-#define PLIC 0x0c000000L
-#define PLIC_PRIORITY (PLIC + 0x0)
-#define PLIC_PENDING (PLIC + 0x1000)
-#define PLIC_MENABLE(hart) (PLIC + 0x2000 + (hart)*0x100)
-#define PLIC_SENABLE(hart) (PLIC + 0x2080 + (hart)*0x100)
-#define PLIC_MPRIORITY(hart) (PLIC + 0x200000 + (hart)*0x2000)
-#define PLIC_SPRIORITY(hart) (PLIC + 0x201000 + (hart)*0x2000)
-#define PLIC_MCLAIM(hart) (PLIC + 0x200004 + (hart)*0x2000)
-#define PLIC_SCLAIM(hart) (PLIC + 0x201004 + (hart)*0x2000)
+// qemu 将platform-level interrupt controller (PLIC) 放置如下位置
+#define PLIC 0x0c000000L                       // PLIC 基地址
+#define PLIC_PRIORITY (PLIC + 0x0)             // 中断优先级寄存器起始地址
+#define PLIC_PENDING (PLIC + 0x1000)           // 中断 pending 位图寄存器
+#define PLIC_MENABLE(hart) (PLIC + 0x2000 + (hart)*0x100)     // Machine 模式中断使能寄存器
+#define PLIC_SENABLE(hart) (PLIC + 0x2080 + (hart)*0x100)     // Supervisor 模式中断使能寄存器
+#define PLIC_MPRIORITY(hart) (PLIC + 0x200000 + (hart)*0x2000) // Machine 模式优先级阈值寄存器
+#define PLIC_SPRIORITY(hart) (PLIC + 0x201000 + (hart)*0x2000) // Supervisor 模式优先级阈值寄存器
+#define PLIC_MCLAIM(hart) (PLIC + 0x200004 + (hart)*0x2000)    // Machine 模式中断 claim/complete 寄存器
+#define PLIC_SCLAIM(hart) (PLIC + 0x201004 + (hart)*0x2000)    // Supervisor 模式中断 claim/complete 寄存器
 
-// the kernel expects there to be RAM
-// for use by the kernel and user pages
-// from physical address 0x80000000 to PHYSTOP.
+
+// 内核假设在物理地址 0x80000000 到 PHYSTOP 之间有可用的 RAM，
+// 用于内核和用户页的分配。
 #define KERNBASE 0x80000000L
 #define PHYSTOP (KERNBASE + 128*1024*1024)
 

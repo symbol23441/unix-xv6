@@ -38,6 +38,8 @@ sys_wait(void)
   return wait(p);
 }
 
+// set break 设置程序堆的段断点
+// 用于用户申请开辟/收缩空间,返回起始地址
 uint64
 sys_sbrk(void)
 {
@@ -58,16 +60,16 @@ sys_sleep(void)
   int n;
   uint ticks0;
 
-  if(argint(0, &n) < 0)
+  if(argint(0, &n) < 0)   // 参数0 获取整数n
     return -1;
-  acquire(&tickslock);
-  ticks0 = ticks;
+  acquire(&tickslock);    // 获取 ticks 全局变量的锁，保护并发访问
+  ticks0 = ticks;         // 记录当前的 tick 值作为起始时间
   while(ticks - ticks0 < n){
     if(myproc()->killed){
       release(&tickslock);
       return -1;
     }
-    sleep(&ticks, &tickslock);
+    sleep(&ticks, &tickslock); // 睡眠在ticks，睡眠其锁tickslock。每次定时器中断会唤醒
   }
   release(&tickslock);
   return 0;
@@ -83,8 +85,7 @@ sys_kill(void)
   return kill(pid);
 }
 
-// return how many clock tick interrupts have occurred
-// since start.
+// 返回自系统启动以来发生的时钟中断（tick）次数。
 uint64
 sys_uptime(void)
 {

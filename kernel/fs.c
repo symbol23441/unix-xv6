@@ -32,8 +32,8 @@
 #include "file.h"
 
 #define min(a, b) ((a) < (b) ? (a) : (b))
-// there should be one superblock per disk device, but we run with
-// only one device
+
+// 每个磁盘设备应该对应一个超级块（superblock），但我们实际上只使用一个设备
 struct superblock sb; 
 
 // Read the super block.
@@ -345,8 +345,9 @@ idup(struct inode *ip)
   return ip;
 }
 
-// Lock the given inode.
-// Reads the inode from disk if necessary.
+
+// 锁住给出的inode
+// 如果必要，从磁盘读出inode
 void
 ilock(struct inode *ip)
 {
@@ -374,7 +375,7 @@ ilock(struct inode *ip)
   }
 }
 
-// Unlock the given inode.
+// 解锁给定的inode
 void
 iunlock(struct inode *ip)
 {
@@ -384,7 +385,7 @@ iunlock(struct inode *ip)
   releasesleep(&ip->lock);
 }
 
-// 释放一个对内存中 inode 的引用。
+// 释放一个对内存中 inode 的引用。（用于是否保留inode）
 // 索引-1 ；若是最后一个索引、inode有效、硬链接为0，则释放磁盘空间、更新inode
 // 如果同时该 inode 在磁盘上也没有链接（nlink 为 0），则释放磁盘上的 inode 及其内容块。
 // 所有对 iput() 的调用都必须放在事务中（即 begin_op/end_op 之间），以防需要释放 inode 时修改磁盘数据。
@@ -464,8 +465,8 @@ bmap(struct inode *ip, uint bn)
   panic("bmap: out of range");
 }
 
-// Truncate inode (discard contents).
-// Caller must hold ip->lock.
+// 截断inode (丢弃内容)。它负责删除 inode 关联的所有数据块，使文件变为空文件（长度为 0）。
+// 调用者必须持有锁
 void
 itrunc(struct inode *ip)
 {
@@ -496,8 +497,8 @@ itrunc(struct inode *ip)
   iupdate(ip);
 }
 
-// Copy stat information from inode.
-// Caller must hold ip->lock.
+// 从inode复制file stat信息
+// 调用者必须持有ip->lock
 void
 stati(struct inode *ip, struct stat *st)
 {
@@ -584,7 +585,7 @@ namecmp(const char *s, const char *t)
 }
 
 // 在一个目录中查找指定的目录项。
-// 如果找到了，则将该目录项在目录文件中的字节偏移量写入 *poff。
+//如果找到，返回该节点的inode指针，将该目录项在目录文件中的偏移量写入 *poff。
 struct inode*
 dirlookup(struct inode *dp, char *name, uint *poff)
 {
@@ -611,7 +612,8 @@ dirlookup(struct inode *dp, char *name, uint *poff)
   return 0;
 }
 
-// Write a new directory entry (name, inum) into the directory dp.
+
+// 写一个新目录(name,inum)项到父目录中
 int
 dirlink(struct inode *dp, char *name, uint inum)
 {
@@ -687,7 +689,7 @@ namex(char *path, int nameiparent, char *name)
   struct inode *ip, *next;
 
   if(*path == '/')
-    ip = iget(ROOTDEV, ROOTINO);
+    ip = iget(ROOTDEV, ROOTINO); // '/'inode固定
   else
     ip = idup(myproc()->cwd);
 

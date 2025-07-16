@@ -6,8 +6,7 @@
 #define BSIZE 1024  // block size
 
 // Disk layout:
-// [ boot block | super block | log | inode blocks |
-//                                          free bit map | data blocks]
+// [ boot block | super block | log | inode blocks | free bit map | data blocks]
 //
 // mkfs computes the super block and builds an initial file system. The
 // super block describes the disk layout:
@@ -28,26 +27,26 @@ struct superblock {
 #define NINDIRECT (BSIZE / sizeof(uint))
 #define MAXFILE (NDIRECT + NINDIRECT)
 
-// On-disk inode structure
+// 磁盘disk上的inode结构
 struct dinode {
-  short type;           // File type
-  short major;          // Major device number (T_DEVICE only)
-  short minor;          // Minor device number (T_DEVICE only)
-  short nlink;          // Number of links to inode in file system
-  uint size;            // Size of file (bytes)
-  uint addrs[NDIRECT+1];   // Data block addresses
+  short type;           // 文件类型
+  short major;          // 主设备号（仅对设备文件有效，即 T_DEVICE 类型）
+  short minor;          // 次设备号（仅对设备文件有效）
+  short nlink;          // 链接数（有多少目录项指向这个 inode）
+  uint size;            // 文件大小（以字节为单位）
+  uint addrs[NDIRECT+1];   // 数据块地址数组（NDIRECT 个直接块 + 1 个间接块）
 };
 
-// Inodes per block.
+// 每磁盘块 inode 的个数
 #define IPB           (BSIZE / sizeof(struct dinode))
 
-// Block containing inode i
+// 计算第i个inode所在的磁盘块
 #define IBLOCK(i, sb)     ((i) / IPB + sb.inodestart)
 
-// Bitmap bits per block
+// 每个块上的bitmap 位数
 #define BPB           (BSIZE*8)
 
-// Block of free map containing bit for block b
+// 计算磁盘块b对应的bitmap位所在的块数
 #define BBLOCK(b, sb) ((b)/BPB + sb.bmapstart)
 
 // Directory is a file containing a sequence of dirent structures.
