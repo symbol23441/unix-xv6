@@ -16,14 +16,9 @@ extern char etext[];  // kernel.ld sets this to end of kernel code.
 extern char trampoline[]; // trampoline.S
 
 // Make a direct-map page table for the kernel.
-pagetable_t
-kvmmake(void)
+void
+kvmmake(pagetable_t kpgtbl)
 {
-  pagetable_t kpgtbl;
-
-  kpgtbl = (pagetable_t) kalloc();
-  memset(kpgtbl, 0, PGSIZE);
-
   // uart registers
   kvmmap(kpgtbl, UART0, UART0, PGSIZE, PTE_R | PTE_W);
 
@@ -43,17 +38,31 @@ kvmmake(void)
   // the highest virtual address in the kernel.
   kvmmap(kpgtbl, TRAMPOLINE, (uint64)trampoline, PGSIZE, PTE_R | PTE_X);
 
-  // map kernel stacks
-  proc_mapstacks(kpgtbl);
-  
-  return kpgtbl;
+  // // map kernel stacks
+  // proc_mapstacks(kpgtbl);
 }
+
+void
+kvmunmake(pagetable_t kpgtbl)
+{
+  kvmunmap(kpgtbl, UART0, PGSIZE);
+  kvmunmap(kpgtbl, VIRTIO0, PGSIZE);
+  kvmunmap(kpgtbl, PLIC, 0x400000);
+  kvmunmap(kpgtbl, KERNBASE, (uint64)etext-KERNBASE);
+  kvmunmap(kpgtbl, (uint64)etext, PHYSTOP-(uint64)etext);
+  kvmunmap(kpgtbl, TRAMPOLINE, PGSIZE);
+}
+
+
 
 // Initialize the one kernel_pagetable
 void
 kvminit(void)
 {
-  kernel_pagetable = kvmmake();
+  kernel_pagetable = (pagetable_t) kalloc();
+  memset(kernel_pagetable, 0, PGSIZE);
+  
+  kvmmake(kernel_pagetable);
 }
 
 // Switch h/w page table register to the kernel's page table,
@@ -185,6 +194,43 @@ uvmunmap(pagetable_t pagetable, uint64 va, uint64 npages, int do_free)
     *pte = 0;
   }
 }
+
+// Unmap virtual addresses in the kernel page table.
+// Assumes va is page-aligned and size is a multiple of PGSIZE.
+// Does not free the underlying physical memory.
+// 取消进程独立内核页表的虚拟地址映射
+// 假设va已经页对齐
+// 不释放物理页表
+void
+kvmunmap(pagetable_t kpgtbl, uint64 va, uint64 size)
+{
+  uint64 a, last;
+  pte_t *pte;
+
+  if (size == 0)
+    panic("kvmunmap: size == 0");
+  if (va % PGSIZE != 0)
+    panic("kvmunmap: va not aligned");
+
+  a = PGROUNDDOWN(va);
+  last = PGROUNDDOWN(va + size - 1);
+
+  for (;;) {
+    if ((pte = walk(kpgtbl, a, 0)) == 0)
+      panic("kvmunmap: walk");
+    if ((*pte & PTE_V) == 0)
+      panic("kvmunmap: not mapped");
+    if ((PTE_FLAGS(*pte) & (PTE_R | PTE_W | PTE_X )) == 0)
+      panic("kvmunmap: not a leaf");
+
+    *pte = 0; // just remove the mapping, don't free physical page
+
+    if (a == last)
+      break;
+    a += PGSIZE;
+  }
+}
+
 
 // create an empty user page table.
 // returns 0 if out of memory.

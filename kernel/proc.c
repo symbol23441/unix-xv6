@@ -52,7 +52,7 @@ procinit(void)
   initlock(&wait_lock, "wait_lock");
   for(p = proc; p < &proc[NPROC]; p++) {
       initlock(&p->lock, "proc");
-      p->kstack = KSTACK((int) (p - proc));
+      // p->kstack = KSTACK((int) (p - proc));
   }
 }
 
@@ -142,8 +142,22 @@ found:
     release(&p->lock);
     return 0;
   }
-  
 
+  // 创建内核栈
+  if((p->kstack_pa = (uint64)kalloc()) == 0){
+    freeproc(p);
+    release(&p->lock);
+    return 0;
+  }
+
+  // 创建进程独立的内核页表
+  p->kpgtbl = proc_kernelpagetable(p);
+  if(p->kpgtbl == 0){
+    freeproc(p);
+    release(&p->lock);
+    return 0;
+  }
+  
   // Set up new context to start executing at forkret,
   // which returns to user space.
   memset(&p->context, 0, sizeof(p->context));
@@ -159,6 +173,9 @@ found:
 static void
 freeproc(struct proc *p)
 {
+  if(p->kstack_pa)
+    kfree((void*)p->kstack_pa);
+  p->kstack_pa = 0;
   if(p->trapframe)
     kfree((void*)p->trapframe);
   p->trapframe = 0;
@@ -167,7 +184,10 @@ freeproc(struct proc *p)
   p->usyscall = 0;
   if(p->pagetable)
     proc_freepagetable(p->pagetable, p->sz);
+  if(p->kpgtbl)
+    proc_freekernelpagetable(p->kpgtbl, p->sz);
   p->pagetable = 0;
+  p->kstack = 0;
   p->sz = 0;
   p->pid = 0;
   p->parent = 0;
@@ -219,6 +239,30 @@ proc_pagetable(struct proc *p)
   return pagetable;
 }
 
+// 进程独立的内核页表
+pagetable_t
+proc_kernelpagetable(struct proc *p)
+{
+  // An empty page table.
+  pagetable_t pagetable;
+  pagetable = (pagetable_t) kalloc();
+  if(pagetable == 0)
+    return 0;
+  memset(pagetable, 0, PGSIZE);
+
+  // 内核栈映射
+  if(mappages(pagetable,PROC_KSTACK,PGSIZE,(uint64)(p->kstack_pa), PTE_R | PTE_W) < 0){
+    uvmfree(pagetable, 0);
+    return 0;
+  }
+  p->kstack = PROC_KSTACK;
+
+  // ---内核相关结构映射---
+  kvmmake(pagetable);
+
+  return pagetable;
+}
+
 // Free a process's page table, and free the
 // physical memory it refers to.
 void
@@ -228,6 +272,18 @@ proc_freepagetable(pagetable_t pagetable, uint64 sz)
   uvmunmap(pagetable, TRAPFRAME, 1, 0);
   uvmunmap(pagetable, USYSCALL, 1, 0);
   uvmfree(pagetable, sz);
+}
+
+void
+proc_freekernelpagetable(pagetable_t pagetable, uint64 sz)
+{
+  uvmunmap(pagetable,PROC_KSTACK,1,0);
+  kvmunmake(pagetable);                // 取消内核相关映射
+
+  // // 取消映射用户空间部分
+  // if(sz > 0)
+  //   uvmunmap(pagetable, 0, PGROUNDUP(sz)/PGSIZE, 0);
+  freewalk(pagetable);
 }
 
 // a user program that calls exec("/init")
@@ -474,7 +530,15 @@ scheduler(void)
         // before jumping back to us.
         p->state = RUNNING;
         c->proc = p;
+        
+        // 切换到进程独立的内核页表
+        w_satp(MAKE_SATP(p->kpgtbl));
+        sfence_vma();
+
         swtch(&c->context, &p->context);
+        
+        // 切换回全局页表
+        kvminithart();
 
         // Process is done running for now.
         // It should have changed its p->state before coming back.

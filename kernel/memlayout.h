@@ -59,6 +59,9 @@
 // each surrounded by invalid guard pages.
 #define KSTACK(p) (TRAMPOLINE - (p)*2*PGSIZE - 3*PGSIZE)
 
+// 进程独立内核页下，当前进程的内核栈位置固定
+#define PROC_KSTACK (TRAMPOLINE - 3*PGSIZE)     
+
 // User memory layout.
 // Address zero first:
 //   text
