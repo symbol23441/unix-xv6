@@ -484,13 +484,13 @@ static struct stats {
   int ncopyinstr;
 } stats;
 
-// int
-// statscopyin(char *buf, int sz) {
-//   int n;
-//   n = snprintf(buf, sz, "copyin: %d\n", stats.ncopyin);
-//   n += snprintf(buf+n, sz, "copyinstr: %d\n", stats.ncopyinstr);
-//   return n;
-// }
+int
+statscopyin(char *buf, int sz) {
+  int n;
+  n = snprintf(buf, sz, "copyin: %d\n", stats.ncopyin);
+  n += snprintf(buf+n, sz, "copyinstr: %d\n", stats.ncopyinstr);
+  return n;
+}
 
 // Copy from user to kernel.
 // Copy len bytes to dst from virtual address srcva in a given page table.
