@@ -20,9 +20,7 @@ exec(char *path, char **argv)
   struct proghdr ph;
   pagetable_t pagetable = 0, oldpagetable;
   struct proc *p = myproc();
-
   begin_op();
-
   if((ip = namei(path)) == 0){
     end_op();
     return -1;
@@ -51,6 +49,8 @@ exec(char *path, char **argv)
     uint64 sz1;
     if((sz1 = uvmalloc(pagetable, sz, ph.vaddr + ph.memsz)) == 0)
       goto bad;
+    if(sz >= PLIC)  // 防止程序内存大小超过PLIC
+      goto bad;
     sz = sz1;
     if((ph.vaddr % PGSIZE) != 0)
       goto bad;
@@ -74,7 +74,6 @@ exec(char *path, char **argv)
   uvmclear(pagetable, sz-2*PGSIZE);
   sp = sz;
   stackbase = sp - PGSIZE;
-
   // Push argument strings, prepare rest of stack in ustack.
   for(argc = 0; argv[argc]; argc++) {
     if(argc >= MAXARG)
@@ -107,6 +106,10 @@ exec(char *path, char **argv)
     if(*s == '/')
       last = s+1;
   safestrcpy(p->name, last, sizeof(p->name));
+
+  // 清除内核页表对程序内存的旧映射，然后新建映射
+  uvmunmap(p->kpgtbl,0,PGROUNDUP(oldsz)/PGSIZE,0);
+  kvmcopymappings(pagetable,p->kpgtbl,0,sz);
     
   // Commit to the user image.
   oldpagetable = p->pagetable;
@@ -118,7 +121,6 @@ exec(char *path, char **argv)
 
   if (p->pid == 1)
     vmprint(p->pagetable);        // exec返回之前打印页表
-
   return argc; // this ends up in a0, the first argument to main(argc, argv)
 
  bad:

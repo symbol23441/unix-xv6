@@ -6,6 +6,9 @@
 #include "defs.h"
 #include "fs.h"
 
+#include "spinlock.h"
+#include "proc.h"
+
 /*
  * the kernel's page table.
  */
@@ -137,6 +140,46 @@ kvmmap(pagetable_t kpgtbl, uint64 va, uint64 pa, uint64 sz, int perm)
 {
   if(mappages(kpgtbl, va, sz, pa, perm) != 0)
     panic("kvmmap");
+}
+
+// 仅赋值映射
+int
+kvmcopymappings(pagetable_t src_pg, pagetable_t dst_pg, uint64 start, uint64 sz){
+  pte_t* pte;
+  uint64 pa, i;
+  uint flags;
+  for(i = PGROUNDUP(start); i< start + sz; i+= PGSIZE){
+    if(((pte = walk(src_pg,i,0)) == 0)){
+      panic("kvmcopymappings: pte should exist");
+    }
+    if((*pte & PTE_V)==0){
+      panic("kvmcopymappings: page not present");
+    }
+    pa = PTE2PA(*pte);
+
+    flags = PTE_FLAGS(*pte) & ~PTE_U;  // 除去用户标识
+
+    if(mappages(dst_pg,i,PGSIZE,pa,flags) != 0)
+      goto err;
+  }
+  return 0;
+  err:
+    // 解除已映射的页表
+    uvmunmap(dst_pg, PGROUNDUP(start), (i - PGROUNDUP(start))/PGSIZE , 0);
+    return -1;
+}
+
+// 与uvmdealloc相似，缩减内存，但不释放物理内存
+uint64
+kvmdealloc(pagetable_t pagetable, uint64 oldsz, uint64 newsz){
+  if(newsz >= oldsz){
+    return oldsz;
+  }
+  if(PGROUNDUP(newsz) < PGROUNDUP(oldsz)){
+    int npage = (PGROUNDUP(oldsz) - (PGROUNDUP(newsz)))/PGSIZE;
+    uvmunmap(pagetable,PGROUNDUP(newsz),npage,0);
+  }
+  return newsz;
 }
 
 // Create PTEs for virtual addresses starting at va that refer to
@@ -271,6 +314,7 @@ uvmalloc(pagetable_t pagetable, uint64 oldsz, uint64 newsz)
 
   if(newsz < oldsz)
     return oldsz;
+  if(newsz >= MAXVA)return oldsz;
 
   oldsz = PGROUNDUP(oldsz);
   for(a = oldsz; a < newsz; a += PGSIZE){
@@ -298,7 +342,6 @@ uvmdealloc(pagetable_t pagetable, uint64 oldsz, uint64 newsz)
 {
   if(newsz >= oldsz)
     return oldsz;
-
   if(PGROUNDUP(newsz) < PGROUNDUP(oldsz)){
     int npages = (PGROUNDUP(oldsz) - PGROUNDUP(newsz)) / PGSIZE;
     uvmunmap(pagetable, PGROUNDUP(newsz), npages, 1);
@@ -327,6 +370,28 @@ freewalk(pagetable_t pagetable)
   kfree((void*)pagetable);
 }
 
+// 调试使用。寻找未清除映射的页，for freewalk panic
+void
+find_leaf_mappings(pagetable_t pagetable, int level, uint64 va_base)
+{
+  for (int i = 0; i < 512; i++) {
+    pte_t pte = pagetable[i];
+    if (pte & PTE_V) {
+      uint64 pa = PTE2PA(pte);
+      uint64 va = va_base + ((uint64)i << (12 + 9 * level));
+
+      if ((pte & (PTE_R | PTE_W | PTE_X)) == 0) {
+        // 是下一级页表
+        find_leaf_mappings((pagetable_t)pa, level - 1, va);
+      } else {
+        // 是叶子页，打印虚拟地址
+        printf("leaf mapping found: va 0x%p -> pa 0x%p (PTE 0x%x)\n", va, pa, pte);
+      }
+    }
+  }
+}
+
+
 // Free user memory pages,
 // then free page-table pages.
 void
@@ -334,6 +399,7 @@ uvmfree(pagetable_t pagetable, uint64 sz)
 {
   if(sz > 0)
     uvmunmap(pagetable, 0, PGROUNDUP(sz)/PGSIZE, 1);
+  // find_leaf_mappings(pagetable, 2, 0); // Sv39: level 2 是顶层页表  调试使用
   freewalk(pagetable);
 }
 
@@ -350,7 +416,6 @@ uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
   uint64 pa, i;
   uint flags;
   char *mem;
-
   for(i = 0; i < sz; i += PGSIZE){
     if((pte = walk(old, i, 0)) == 0)
       panic("uvmcopy: pte should exist");
@@ -410,6 +475,22 @@ copyout(pagetable_t pagetable, uint64 dstva, char *src, uint64 len)
   }
   return 0;
 }
+//
+// This file contains copyin_new() and copyinstr_new(), the
+// replacements for copyin and coyinstr in vm.c.
+//
+static struct stats {
+  int ncopyin;
+  int ncopyinstr;
+} stats;
+
+// int
+// statscopyin(char *buf, int sz) {
+//   int n;
+//   n = snprintf(buf, sz, "copyin: %d\n", stats.ncopyin);
+//   n += snprintf(buf+n, sz, "copyinstr: %d\n", stats.ncopyinstr);
+//   return n;
+// }
 
 // Copy from user to kernel.
 // Copy len bytes to dst from virtual address srcva in a given page table.
@@ -417,23 +498,24 @@ copyout(pagetable_t pagetable, uint64 dstva, char *src, uint64 len)
 int
 copyin(pagetable_t pagetable, char *dst, uint64 srcva, uint64 len)
 {
-  uint64 n, va0, pa0;
+  // uint64 n, va0, pa0;
 
-  while(len > 0){
-    va0 = PGROUNDDOWN(srcva);
-    pa0 = walkaddr(pagetable, va0);
-    if(pa0 == 0)
-      return -1;
-    n = PGSIZE - (srcva - va0);
-    if(n > len)
-      n = len;
-    memmove(dst, (void *)(pa0 + (srcva - va0)), n);
+  // while(len > 0){
+  //   va0 = PGROUNDDOWN(srcva);
+  //   pa0 = walkaddr(pagetable, va0);
+  //   if(pa0 == 0)
+  //     return -1;
+  //   n = PGSIZE - (srcva - va0);
+  //   if(n > len)
+  //     n = len;
+  //   memmove(dst, (void *)(pa0 + (srcva - va0)), n);
 
-    len -= n;
-    dst += n;
-    srcva = va0 + PGSIZE;
-  }
-  return 0;
+  //   len -= n;
+  //   dst += n;
+  //   srcva = va0 + PGSIZE;
+  // }
+  // return 0;
+  return copyin_new(dst,srcva,len);
 }
 
 // Copy a null-terminated string from user to kernel.
@@ -443,40 +525,69 @@ copyin(pagetable_t pagetable, char *dst, uint64 srcva, uint64 len)
 int
 copyinstr(pagetable_t pagetable, char *dst, uint64 srcva, uint64 max)
 {
-  uint64 n, va0, pa0;
-  int got_null = 0;
+  // uint64 n, va0, pa0;
+  // int got_null = 0;
 
-  while(got_null == 0 && max > 0){
-    va0 = PGROUNDDOWN(srcva);
-    pa0 = walkaddr(pagetable, va0);
-    if(pa0 == 0)
-      return -1;
-    n = PGSIZE - (srcva - va0);
-    if(n > max)
-      n = max;
+  // while(got_null == 0 && max > 0){
+  //   va0 = PGROUNDDOWN(srcva);
+  //   pa0 = walkaddr(pagetable, va0);
+  //   if(pa0 == 0)
+  //     return -1;
+  //   n = PGSIZE - (srcva - va0);
+  //   if(n > max)
+  //     n = max;
 
-    char *p = (char *) (pa0 + (srcva - va0));
-    while(n > 0){
-      if(*p == '\0'){
-        *dst = '\0';
-        got_null = 1;
-        break;
-      } else {
-        *dst = *p;
-      }
-      --n;
-      --max;
-      p++;
-      dst++;
-    }
+  //   char *p = (char *) (pa0 + (srcva - va0));
+  //   while(n > 0){
+  //     if(*p == '\0'){
+  //       *dst = '\0';
+  //       got_null = 1;
+  //       break;
+  //     } else {
+  //       *dst = *p;
+  //     }
+  //     --n;
+  //     --max;
+  //     p++;
+  //     dst++;
+  //   }
 
-    srcva = va0 + PGSIZE;
-  }
-  if(got_null){
-    return 0;
-  } else {
+  //   srcva = va0 + PGSIZE;
+  // }
+  // if(got_null){
+  //   return 0;
+  // } else {
+  //   return -1;
+  // }
+  return copyinstr_new(dst,srcva,max);
+}
+
+// 在进程内核页表下映射用户空间，直接解引用
+int
+copyin_new(char *dst, uint64 srcva, uint64 len)
+{
+  struct proc *p = myproc();
+
+  if (srcva >= p->sz || srcva+len > p->sz || srcva+len < srcva)
     return -1;
+  memmove((void *) dst, (void *)srcva, len);
+  stats.ncopyin++;   // XXX lock
+  return 0;
+}
+// 在进程内核页表下映射用户空间，直接解引用
+int
+copyinstr_new(char *dst, uint64 srcva, uint64 max)
+{
+  struct proc *p = myproc();
+  char *s = (char *) srcva;
+  
+  stats.ncopyinstr++;   // XXX lock
+  for(int i = 0; i < max && srcva + i < p->sz; i++){
+    dst[i] = s[i];
+    if(s[i] == '\0')
+      return 0;
   }
+  return -1;
 }
 
 // 递归打印页表

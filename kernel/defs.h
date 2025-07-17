@@ -176,11 +176,16 @@ int             copyin(pagetable_t, char *, uint64, uint64);
 int             copyinstr(pagetable_t, char *, uint64, uint64);
 void            freewalk(pagetable_t pagetable);
 
+int             copyin_new(char *dst, uint64 srcva, uint64 len);
+int             copyinstr_new(char *dst, uint64 srcva, uint64 max);
+
 int             vmprint(pagetable_t pagetable);
 void            kvmmake(pagetable_t kpgtbl);
 void            kvmunmake(pagetable_t kpgtbl);
 void            kvmunmap(pagetable_t kpgtbl, uint64 va, uint64 size);
-
+int             kvmcopymappings(pagetable_t src_pg, pagetable_t dst_pg, uint64 start, uint64 sz);
+uint64          kvmdealloc(pagetable_t pagetable, uint64 oldsz, uint64 newsz);
+void            find_leaf_mappings(pagetable_t pagetable, int level, uint64 va_base);
 // plic.c
 void            plicinit(void);
 void            plicinithart(void);

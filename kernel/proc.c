@@ -280,11 +280,26 @@ proc_freekernelpagetable(pagetable_t pagetable, uint64 sz)
   uvmunmap(pagetable,PROC_KSTACK,1,0);
   kvmunmake(pagetable);                // 取消内核相关映射
 
-  // // 取消映射用户空间部分
-  // if(sz > 0)
-  //   uvmunmap(pagetable, 0, PGROUNDUP(sz)/PGSIZE, 0);
+  // 取消映射用户空间部分
+  if(sz > 0)
+    uvmunmap(pagetable, 0, PGROUNDUP(sz)/PGSIZE, 0);
   freewalk(pagetable);
 }
+
+// void
+// proc_freekernelpagetable(pagetable_t pagetable)
+// {
+//   // 清除所有映射
+//   for(int i = 0 ; i < 512 ; ++i){
+//     pte_t pte = pagetable[i];
+//     uint64 child = PTE2PA(pte);
+//     if((pte & PTE_V) && (pte & (PTE_R | PTE_W | PTE_X)) == 0){
+//       proc_freekernelpagetable((pagetable_t)child);
+//       pagetable[i] = 0;
+//     }
+//   }
+//   kfree((void *)pagetable);
+// }
 
 // a user program that calls exec("/init")
 // od -t xC initcode
@@ -311,7 +326,8 @@ userinit(void)
   // and data into it.
   uvminit(p->pagetable, initcode, sizeof(initcode));
   p->sz = PGSIZE;
-
+  // 同步映射到进程内核页表
+  kvmcopymappings(p->pagetable,p->kpgtbl,0,p->sz);
   // prepare for the very first "return" from kernel to user.
   p->trapframe->epc = 0;      // user program counter
   p->trapframe->sp = PGSIZE;  // user stack pointer
@@ -330,17 +346,28 @@ int
 growproc(int n)
 {
   uint sz;
+  uint64 newsz;
   struct proc *p = myproc();
 
   sz = p->sz;
   if(n > 0){
-    if((sz = uvmalloc(p->pagetable, sz, sz + n)) == 0) {
+    if(sz + n < sz)return -1;// overflow 检查
+    if((newsz = uvmalloc(p->pagetable, sz, sz + n)) == 0) {
       return -1;
     }
+    if(kvmcopymappings(p->pagetable,p->kpgtbl,sz, newsz - sz)!=0){
+      uvmdealloc(p->pagetable,newsz,sz);
+      return -1;
+    }
+    p->sz = newsz;
   } else if(n < 0){
-    sz = uvmdealloc(p->pagetable, sz, sz + n);
+    if((int)sz + n < 0)return -1;  // underflow 检查
+    uvmdealloc(p->pagetable, sz, sz + n);
+    // 内核页表中的映射同步缩小
+    newsz = kvmdealloc(p->kpgtbl, sz, sz + n);
+    p->sz = newsz;
   }
-  p->sz = sz;
+
   return 0;
 }
 
@@ -357,13 +384,22 @@ fork(void)
   if((np = allocproc()) == 0){
     return -1;
   }
-
   // Copy user memory from parent to child.
   if(uvmcopy(p->pagetable, np->pagetable, p->sz) < 0){
     freeproc(np);
     release(&np->lock);
     return -1;
   }
+
+  // 映射到进程独立内核空间
+  if(kvmcopymappings(np->pagetable, np->kpgtbl, 0, p->sz)<0){
+    freeproc(np);
+    release(&np->lock);
+    return -1;
+  }
+
+
+
   np->sz = p->sz;
 
   // copy saved user registers.
@@ -449,7 +485,6 @@ exit(int status)
   p->state = ZOMBIE;
 
   release(&wait_lock);
-
   // Jump into the scheduler, never to return.
   sched();
   panic("zombie exit");
