@@ -3,8 +3,11 @@
 #include "memlayout.h"
 #include "elf.h"
 #include "riscv.h"
-#include "defs.h"
 #include "fs.h"
+#include "spinlock.h"
+#include "proc.h"
+
+#include "defs.h"
 
 /*
  * the kernel's page table.
@@ -146,6 +149,7 @@ mappages(pagetable_t pagetable, uint64 va, uint64 size, uint64 pa, int perm)
   a = PGROUNDDOWN(va);
   last = PGROUNDDOWN(va + size - 1);
   for(;;){
+    // printf("[mappages] mapping va = 0x%p -> pa = 0x%p\n", a, pa);  //  打印页对齐VA和物理地址
     if((pte = walk(pagetable, a, 1)) == 0)
       return -1;
     if(*pte & PTE_V)
@@ -172,6 +176,7 @@ uvmunmap(pagetable_t pagetable, uint64 va, uint64 npages, int do_free)
     panic("uvmunmap: not aligned");
 
   for(a = va; a < va + npages*PGSIZE; a += PGSIZE){
+    // printf("[uvmunmap] unmapping va = 0x%p\n", a);  //  打印页对齐VA
     if((pte = walk(pagetable, a, 0)) == 0)
       panic("uvmunmap: walk");
     if((*pte & PTE_V) == 0)
@@ -291,6 +296,7 @@ uvmfree(pagetable_t pagetable, uint64 sz)
   freewalk(pagetable);
 }
 
+
 // Given a parent process's page table, copy
 // its memory into a child's page table.
 // Copies both the page table and the
@@ -303,7 +309,7 @@ uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
   pte_t *pte;
   uint64 pa, i;
   uint flags;
-  char *mem;
+  // char *mem;
 
   for(i = 0; i < sz; i += PGSIZE){
     if((pte = walk(old, i, 0)) == 0)
@@ -311,20 +317,74 @@ uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
     if((*pte & PTE_V) == 0)
       panic("uvmcopy: page not present");
     pa = PTE2PA(*pte);
+
+    // if((mem = kalloc()) == 0)
+    //   goto err;
+    // memmove(mem, (char*)pa, PGSIZE);
+
+    // 清除父进程中所有PTE_W的页，改为PTE_COW,表示所在页是一个写时复制的共享页
+    // 如果页本身不可写，不会添加这个标志位
+    if(*pte & PTE_W)
+      *pte = (*pte & ~PTE_W) | PTE_COW;
     flags = PTE_FLAGS(*pte);
-    if((mem = kalloc()) == 0)
-      goto err;
-    memmove(mem, (char*)pa, PGSIZE);
-    if(mappages(new, i, PGSIZE, (uint64)mem, flags) != 0){
-      kfree(mem);
+
+    if(mappages(new, i, PGSIZE, (uint64)pa, flags) != 0){
+      // kfree(mem);
       goto err;
     }
+    pgaddref(pa);
+
   }
   return 0;
 
  err:
   uvmunmap(new, 0, i / PGSIZE, 1);
   return -1;
+}
+
+// 是COW返回1，失败0
+int
+uvmcheckcowpage(uint64 va){
+  pte_t *pte;
+  struct proc* p = myproc();
+  // 进程地址范围内，地址映射有效，pte有效且COW
+  return va < p->sz
+        &&  ((pte = walk(p->pagetable,va,0)) != 0)
+        &&  (*pte & PTE_V)
+        &&  (*pte & PTE_COW);
+}
+
+// 复制需要写的COW页（加载无效页rcause13，存储无效页rcause15,异常中断触发）
+uint64 
+uvmcopycowpage(uint64 va){
+  struct proc* p = myproc();
+  pagetable_t pagetable = p->pagetable;
+  uint64 pa,newpa;
+  pte_t *pte;
+  uint flags;
+
+
+  if((pte = walk(pagetable,va, 0)) == 0)
+    panic("uvmcopycowpage: pte should exist");
+  if((*pte & PTE_V) == 0)
+    panic("uvmcopycowpage: page not present");
+  pa = PTE2PA(*pte);
+
+  // 删除COW标志，附上W
+  flags = PTE_FLAGS(*pte);
+  flags = (flags & ~PTE_COW) | PTE_W ;
+
+  
+  if((newpa = uvm_copycowpage_deref(pa))==0){
+    return -1;
+  }
+  uvmunmap(pagetable,PGROUNDDOWN(va),1,0);
+  if(mappages(pagetable, PGROUNDDOWN(va), PGSIZE, (uint64)newpa, flags) != 0){
+    kfree((void*)newpa);
+    panic("uvmcopycowpage mapping");
+  }
+
+  return 0;
 }
 
 // mark a PTE invalid for user access.
@@ -349,6 +409,9 @@ copyout(pagetable_t pagetable, uint64 dstva, char *src, uint64 len)
   uint64 n, va0, pa0;
 
   while(len > 0){
+    // 软件走表，不会触发缺页中断，因此需要手动检查并复制
+    if(uvmcheckcowpage(dstva))
+      uvmcopycowpage(dstva);
     va0 = PGROUNDDOWN(dstva);
     pa0 = walkaddr(pagetable, va0);
     if(pa0 == 0)

@@ -64,6 +64,9 @@ void*           kalloc(void);
 void            kfree(void *);
 void            kinit(void);
 
+void            pgaddref(uint64 pa); // 添加统一物理页引用
+uint64          uvm_copycowpage_deref(uint64 pa);
+
 // log.c
 void            initlog(int, struct superblock*);
 void            log_write(struct buf*);
@@ -170,6 +173,9 @@ uint64          walkaddr(pagetable_t, uint64);
 int             copyout(pagetable_t, uint64, char *, uint64);
 int             copyin(pagetable_t, char *, uint64, uint64);
 int             copyinstr(pagetable_t, char *, uint64, uint64);
+
+int             uvmcheckcowpage(uint64 va);     // 是否为COW映射页
+uint64          uvmcopycowpage(uint64 va);      // COW 复制新的写能页
 
 // plic.c
 void            plicinit(void);
