@@ -64,7 +64,8 @@ initlog(int dev, struct superblock *sb)
   recover_from_log();
 }
 
-// Copy committed blocks from log to their home location
+
+// 将已提交的日志块(log blocks) 从日志区 复制到 磁盘的真实位置
 static void
 install_trans(int recovering)
 {
@@ -96,9 +97,9 @@ read_head(void)
   brelse(buf);
 }
 
-// Write in-memory log header to disk.
-// This is the true point at which the
-// current transaction commits.
+
+// 将内存中的log header写入磁盘
+// 这是事务提交的真正时刻
 static void
 write_head(void)
 {
@@ -194,8 +195,8 @@ static void
 commit()
 {
   if (log.lh.n > 0) {
-    write_log();     // Write modified blocks from cache to log
-    write_head();    // Write header to disk -- the real commit
+    write_log();     //  将修改的缓存块写入log
+    write_head();    //  将log head 写入磁盘，真正提交
     install_trans(0); // Now install writes to home locations
     log.lh.n = 0;
     write_head();    // Erase the transaction from the log
