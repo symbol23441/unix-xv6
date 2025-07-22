@@ -86,6 +86,7 @@ testsymlink(void)
   if (c != 'a')
     fail("failed to read bytes from b");
 
+
   unlink("/testsymlink/a");
   if(open("/testsymlink/b", O_RDWR) >= 0)
     fail("Should not be able to open b after deleting a");

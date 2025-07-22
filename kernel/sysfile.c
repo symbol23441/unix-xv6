@@ -109,7 +109,6 @@ sys_fstat(void)
 {
   struct file *f;
   uint64 st; // user pointer to struct stat
-
   if(argfd(0, 0, &f) < 0 || argaddr(1, &st) < 0)
     return -1;
   return filestat(f, st);
@@ -304,11 +303,42 @@ sys_open(void)
       return -1;
     }
   } else {
+    // 读取当前文件路径的inode
     if((ip = namei(path)) == 0){
       end_op();
       return -1;
     }
     ilock(ip);
+    int i =0;
+    // 若是符号链接文件，判断是不是最后一层
+    if(ip->type == T_SYMLINK && (omode & O_NOFOLLOW)==0){
+      for(i=0;i < MAX_SYMLINK_DEPTH; i++){
+        if(readi(ip, 0, (uint64)path, 0, MAXPATH) != MAXPATH) {
+          iunlockput(ip);
+          end_op();
+          return -1;
+        }
+        iunlockput(ip);
+        if((ip = namei(path)) == 0){
+          end_op();
+          return -1;
+        }
+        ilock(ip); 
+
+        if(ip->type != T_SYMLINK)break;
+      }
+      
+      // 超过最大允许深度后仍然为符号链接，则返回错误
+      if(ip->type == T_SYMLINK) {
+        iunlockput(ip);
+        end_op();
+        return -1;
+      }
+    }
+
+
+
+    // 对目录进行只读保护
     if(ip->type == T_DIR && omode != O_RDONLY){
       iunlockput(ip);
       end_op();
@@ -482,5 +512,35 @@ sys_pipe(void)
     fileclose(wf);
     return -1;
   }
+  return 0;
+}
+
+
+uint64
+sys_symlink(void)
+{
+  char target[MAXPATH], path[MAXPATH];
+  struct inode* ip_path;
+
+  if(argstr(0, target, MAXPATH) < 0 || argstr(1, path, MAXPATH) < 0) {
+    return -1;
+  }
+
+  begin_op();
+  // 分配一个inode结点，create返回锁定的inode
+  ip_path = create(path, T_SYMLINK, 0, 0);
+  if(ip_path == 0) {
+    end_op();
+    return -1;
+  }
+  // 向inode数据块中写入target路径
+  if(writei(ip_path, 0, (uint64)target, 0, MAXPATH) < MAXPATH) {
+    iunlockput(ip_path);
+    end_op();
+    return -1;
+  }
+
+  iunlockput(ip_path);
+  end_op();
   return 0;
 }
