@@ -24,6 +24,10 @@ char* sbrk(int);
 int sleep(int);
 int uptime(void);
 
+// mmap 和 munmap 函数原型（放在 user.h 或 mmap.h）
+void* mmap(void *addr, int length, int prot, int flags, int fd, int offset);
+int munmap(void *addr, int length);
+
 // ulib.c
 int stat(const char*, struct stat*);
 char* strcpy(char*, const char*);

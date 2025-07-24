@@ -4,7 +4,15 @@
 #include "elf.h"
 #include "riscv.h"
 #include "defs.h"
+
+
+#include "spinlock.h"
+#include "sleeplock.h"
 #include "fs.h"
+#include "file.h"
+#include "proc.h"
+#include "fcntl.h"
+
 
 /*
  * the kernel's page table.
@@ -77,11 +85,12 @@ kvminithart()
 //   21..29 -- 9 bits of level-1 index.
 //   12..20 -- 9 bits of level-0 index.
 //    0..11 -- 12 bits of byte offset within the page.
+// alloc 为1，分配中间页表。 alloc 0 仅用于查询va是否存在页映射。
 pte_t *
 walk(pagetable_t pagetable, uint64 va, int alloc)
 {
-  if(va >= MAXVA)
-    panic("walk");
+  // if(va >= MAXVA)
+  //   panic("walk");
 
   for(int level = 2; level > 0; level--) {
     pte_t *pte = &pagetable[PX(level, va)];
@@ -431,4 +440,111 @@ copyinstr(pagetable_t pagetable, char *dst, uint64 srcva, uint64 max)
   } else {
     return -1;
   }
+}
+
+struct vm_area*
+checkvma(uint64 va){
+  int i;
+  struct proc* p = myproc();
+  for(i=0;i<NVMA;i++){
+    if(p->vma[i].used && p->vma[i].vastart<=va && va < (p->vma[i].vastart+p->vma[i].sz))
+      return &p->vma[i];
+  }
+  return 0;
+}
+
+int
+vmatraphandler(struct vm_area* vv,uint64 va,uint64 trapcause){
+  struct proc* p = myproc();
+  int pte_flags = 0;
+  struct file *vfile = vv->vfile;
+  pte_t *pte;
+  
+
+  //读权限检查
+  if(trapcause == 13 && (vv->proct & PROT_READ)==0)
+    printf("vmatraphandler hane no PROT_READ\n");
+  // 写权限检查
+  if(trapcause == 15 && (vv->proct & PROT_WRITE)==0)
+    printf("vmatraphandler hane no PROT_WRITE\n");
+
+  // 分配实际物理页
+  va = PGROUNDDOWN(va);
+  pte = walk(p->pagetable,va,1);
+  if((*pte & PTE_V)==0){ // 页表项无效
+      // 分配物理页
+      void* pa = kalloc();
+      if(!pa)
+        panic("allocmmappage: physics page not enough");
+      memset(pa,0,PGSIZE);
+      // 读文件到物理页
+      begin_op();
+      ilock(vfile->ip);
+      int nread = readi(vfile->ip,0,(uint64)pa,vv->off + va - vv->vastart,PGSIZE);
+      if (nread < 0)
+        panic("vmaallochandler: readi failed");
+      iunlock(vfile->ip);
+      end_op();
+      // 映射物理页
+      pte_flags |= PTE_U;
+      if(mappages(p->pagetable,va,PGSIZE,(uint64)pa,pte_flags)!=0){
+        printf("vmatraphandler mappages page failed\n");
+        kfree(pa);
+        return -1;
+      }
+  }
+  
+
+  // 赋予读权限
+  if(trapcause == 13 && (vv->proct & PROT_READ)!=0){
+    pte_flags |= PTE_R;
+    *pte |= pte_flags;
+  }
+
+
+  // 赋予写权限，置脏位
+  if(trapcause == 15 && (vv->proct & PROT_WRITE)!=0){
+    pte_flags |= PTE_W | PTE_D;
+    *pte |= pte_flags;
+  } 
+
+  return 0;
+}
+
+// 函数要求：va 必须页对齐，
+void
+vmaunmap(pagetable_t pagetable, uint64 va, uint64 nbytes, struct vm_area* vv) {
+  uint64 a;
+  pte_t *pte;
+
+  for (a = va; a < va + nbytes; a += PGSIZE) {
+    if ((pte = walk(pagetable, a, 0)) == 0)
+      continue;
+
+    if ((*pte & PTE_V) == 0)
+      continue;
+
+    // if (PTE_FLAGS(*pte) == PTE_V)
+    //   panic("vmaunmap: not a leaf");
+
+    uint64 pa = PTE2PA(*pte);
+
+    // 写回 MAP_SHARED 且 脏页
+    if ((*pte & PTE_D) && (vv->flags & MAP_SHARED)) {
+      begin_op();
+      ilock(vv->vfile->ip);
+
+      // 写回文件偏移 = 映射偏移 + 当前页与起始页偏移
+      uint64 file_offset = vv->off + (a - vv->vastart);
+      writei(vv->vfile->ip, 0, (uint64)pa, file_offset, PGSIZE);
+
+      iunlock(vv->vfile->ip);
+      end_op();
+    }
+
+    // 释放物理内存并取消映射
+    kfree((void*)pa);
+    uvmunmap(pagetable, a, 1, 0);
+  }
+  
 }

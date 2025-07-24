@@ -653,8 +653,9 @@ namex(char *path, int nameiparent, char *name)
     iunlockput(ip);
     ip = next;
   }
+  // 路径错误情况
   if(nameiparent){
-    iput(ip);
+    iput(ip); 
     return 0;
   }
   return ip;

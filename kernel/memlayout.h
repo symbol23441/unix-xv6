@@ -65,3 +65,6 @@
 //   TRAPFRAME (p->trapframe, used by the trampoline)
 //   TRAMPOLINE (the same page as in the kernel)
 #define TRAPFRAME (TRAMPOLINE - PGSIZE)
+
+// mmap 映射从高到低生长，MMAPEND为文件内存最后一页（开区间）
+#define MMAPEND TRAPFRAME

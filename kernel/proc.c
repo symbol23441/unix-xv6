@@ -3,6 +3,9 @@
 #include "memlayout.h"
 #include "riscv.h"
 #include "spinlock.h"
+#include "sleeplock.h"
+#include "fs.h"
+#include "file.h"
 #include "proc.h"
 #include "defs.h"
 
@@ -141,6 +144,9 @@ found:
   p->context.ra = (uint64)forkret;
   p->context.sp = p->kstack + PGSIZE;
 
+  // 文件映射初始化
+  memset(p->vma,0,sizeof(p->vma));
+  
   return p;
 }
 
@@ -153,6 +159,10 @@ freeproc(struct proc *p)
   if(p->trapframe)
     kfree((void*)p->trapframe);
   p->trapframe = 0;
+  for(int i =0;i<NVMA;++i){
+    struct vm_area* v = &p->vma[i];
+    vmaunmap(p->pagetable,v->vastart,v->sz,v);
+  }
   if(p->pagetable)
     proc_freepagetable(p->pagetable, p->sz);
   p->pagetable = 0;
@@ -288,6 +298,15 @@ fork(void)
     return -1;
   }
   np->sz = p->sz;
+
+  // 复制vma 文件映射结构
+  for(int i = 0;i<NVMA;i++){
+    if(p->vma[i].used){
+      np->vma[i] = p->vma[i];
+      filedup(p->vma[i].vfile); // 文件引用+1
+    }
+  }
+  
 
   // copy saved user registers.
   *(np->trapframe) = *(p->trapframe);

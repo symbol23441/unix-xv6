@@ -113,10 +113,11 @@ mmap_test(void)
   char *p = mmap(0, PGSIZE*2, PROT_READ, MAP_PRIVATE, fd, 0);
   if (p == MAP_FAILED)
     err("mmap (1)");
+  printf("test 111\n");
   _v1(p);
+  printf("test 111\n");
   if (munmap(p, PGSIZE*2) == -1)
     err("munmap (1)");
-
   printf("test mmap f: OK\n");
     
   printf("test mmap private\n");

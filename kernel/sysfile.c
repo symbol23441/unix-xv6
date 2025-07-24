@@ -15,6 +15,7 @@
 #include "sleeplock.h"
 #include "file.h"
 #include "fcntl.h"
+#include "memlayout.h"
 
 // Fetch the nth word-sized system call argument as a file descriptor
 // and return both the descriptor and the corresponding struct file.
@@ -481,6 +482,103 @@ sys_pipe(void)
     fileclose(rf);
     fileclose(wf);
     return -1;
+  }
+  return 0;
+}
+
+
+uint64
+sys_mmap(void)
+{
+  uint64 va_start;
+  int sz;
+  int proct;
+  int flags;
+  int fd;
+  int off;
+  struct file *f;
+  int i;
+  
+  if(argaddr(0,&va_start)<0 || argint(1,&sz)<0
+  || argint(2,&proct) || argint(3,&flags)
+  || argfd(4,&fd,&f) || argint(5,&off))
+  {
+    return 0;
+  }
+
+  // addr和offset固定为0，简化发生的可能
+  if(va_start != 0 || off != 0 || sz < 0)
+    return 0;
+
+  // 不允许不可写的文件，执行写回策略
+  if((!f->writable) && (proct & PROT_WRITE)!=0 && flags ==  MAP_SHARED)
+    return -1;
+
+  // 查找一个空槽、与最小va_strart。 映射从高到低映射。
+  uint64 minvma = MMAPEND; // 前闭后开
+  int unused_index = -1;
+  struct proc* p = myproc();
+  for(i=NVMA-1;i>=0;i--){
+    if(p->vma[i].used){
+      if(p->vma[i].vastart<minvma)
+        minvma = PGROUNDDOWN(p->vma[i].vastart);
+    }else
+        unused_index = i;
+  }
+  if(unused_index == -1) 
+    panic("mmap:no free va_start");
+
+  p->vma[unused_index].used = 1;
+  p->vma[unused_index].sz = PGROUNDUP(sz);
+  p->vma[unused_index].vastart = PGROUNDDOWN(minvma - sz);
+  
+  p->vma[unused_index].vfd = fd;
+  p->vma[unused_index].vfile = f;
+  p->vma[unused_index].proct = proct;
+  p->vma[unused_index].flags = flags;
+  p->vma[unused_index].off = off;
+
+  filedup(f); // 文件引用+1
+
+  return p->vma[unused_index].vastart;
+}
+
+
+
+uint64
+sys_munmap(void){
+  uint64 addr,sz;
+  if(argaddr(0,&addr)<0 || argaddr(1,&sz)<0 || sz ==0)
+    return -1;
+  
+  struct proc* p = myproc();
+  struct vm_area* vv = checkvma(addr);
+  sz = sz < vv->sz ? sz:vv->sz; // sz 安全重置
+  if(vv == 0)
+    return -1;
+  if(addr > vv->vastart && addr + sz < vv->vastart + vv->sz)
+    return -1;
+  
+  uint64 addr_alinged = addr;
+  if(addr > vv->vastart)
+    addr_alinged = PGROUNDUP(addr);
+  int n = sz - (addr_alinged - addr);   // 要释放的字节数
+
+  vmaunmap(p->pagetable, addr_alinged,n,vv);  // 释放addr向上页对齐后的相应页，需要时写回文件块
+
+  if(addr <= vv->vastart && addr + sz > vv->vastart){                 //删除前半部分
+    vv->off += addr+sz-vv->vastart;
+    vv->sz -= addr+sz-vv->vastart;;
+    vv->vastart = addr + sz;
+  }else if(addr > vv->vastart && addr + sz > vv->vastart + vv->sz){   //删除后半部分
+    vv->sz -= vv->vastart + vv->sz - addr;
+  }else{
+    panic("sys_munmap unexecpted example");
+  }
+
+  if(vv->sz <=0){
+    fileclose(vv->vfile);
+    vv->used = 0;
   }
   return 0;
 }
